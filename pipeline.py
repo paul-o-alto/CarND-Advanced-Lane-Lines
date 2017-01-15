@@ -1,16 +1,18 @@
+import glob
+import numpy as np
 import cv2
 
 # Define a function that takes an image, gradient orientation,
 # and threshold min / max values.
-def abs_sobel_thresh(img, orient='x', thresh_min=0, thresh_max=255):
+def abs_sobel_thresh(img, sobel_kernel=3, orient='x', thresh_min=0, thresh_max=255):
     # Convert to grayscale
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     # Apply x or y gradient with the OpenCV Sobel() function
     # and take the absolute value
     if orient == 'x':
-        abs_sobel = np.absolute(cv2.Sobel(gray, cv2.CV_64F, 1, 0))
+        abs_sobel = np.absolute(cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel))
     if orient == 'y':
-        abs_sobel = np.absolute(cv2.Sobel(gray, cv2.CV_64F, 0, 1))
+        abs_sobel = np.absolute(cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel))
     # Rescale back to 8 bit integer
     scaled_sobel = np.uint8(255*abs_sobel/np.max(abs_sobel))
     # Create a copy and apply the threshold
@@ -25,7 +27,7 @@ def abs_sobel_thresh(img, orient='x', thresh_min=0, thresh_max=255):
 # for a given sobel kernel size and threshold values
 def mag_thresh(img, sobel_kernel=3, mag_thresh=(0, 255)):
     # Convert to grayscale
-    #gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    #gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     # Take both Sobel x and y gradients
     sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
     sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
@@ -44,7 +46,7 @@ def mag_thresh(img, sobel_kernel=3, mag_thresh=(0, 255)):
 # Define a function to threshold an image for a given range and Sobel kernel
 def dir_threshold(img, sobel_kernel=3, thresh=(0, np.pi/2)):
     # Grayscale
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     # Calculate the x and y gradients
     sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
     sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
@@ -70,10 +72,11 @@ def calibration():
     imgpoints = [] # 2d points in image plane.
 
     # Make a list of calibration images
-    images = glob.glob('calibration_wide/GO*.jpg') #TODO
+    images = glob.glob('camera_cal/calibration*.jpg')
 
     # Step through the list and search for chessboard corners
     for idx, fname in enumerate(images):
+        print("Calibrating camera with image %s" % fname)
         img = cv2.imread(fname)
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
@@ -86,22 +89,55 @@ def calibration():
             imgpoints.append(corners)
 
             # Draw and display the corners
-            cv2.drawChessboardCorners(img, (8,6), corners, ret)
+            #cv2.drawChessboardCorners(img, (8,6), corners, ret)
             #write_name = 'corners_found'+str(idx)+'.jpg'
             #cv2.imwrite(write_name, img)
-            cv2.imshow('img', img)
-            cv2.waitKey(500)
+            #cv2.imshow('img', img)
+            #cv2.waitKey(1) #500)
 
     cv2.destroyAllWindows()
+    print("objpoints = %s" % objpoints)
+    print("imgpoints = %s" % imgpoints)
     return cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1],None,None)
  
+# Define a function that thresholds the S-channel of HLS
+def hls_select(img, thresh=(0, 255)):
+    hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS)
+    s_channel = hls[:,:,2]
+    binary_output = np.zeros_like(s_channel)
+    binary_output[(s_channel > thresh[0]) & (s_channel <= thresh[1])] = 1
+    return binary_output
+
+def project_onto(img):
+    # Create an image to draw the lines on
+    warp_zero = np.zeros_like(warped).astype(np.uint8)
+    color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
+
+    # Recast the x and y points into usable format for cv2.fillPoly()
+    pts_left  = np.array([ np.transpose(np.vstack([left_fitx , yvals]))])
+    pts_right = np.array([np.flipud(
+                           np.transpose(np.vstack([right_fitx, yvals])))])
+    pts = np.hstack((pts_left, pts_right))
+
+    # Draw the lane onto the warped blank image
+    cv2.fillPoly(color_warp, np.int_([pts]), (0,255, 0))
+
+    # Warp the blank back to original image space using 
+    # inverse perspective matrix (Minv)
+    newwarp = cv2.warpPerspective(
+                  color_warp, Minv, (image.shape[1], image.shape[0])) 
+    # Combine the result with the original image
+    result = cv2.addWeighted(undist, 1, newwarp, 0.3, 0)
+    plt.imshow(result)
 
 def pipeline(cal_vars, img):
 
+    # TODO: LOOK BACK AT PROJECT 1 for more useful code
     ret, mtx, dist, rvecs, tvecs = cal_vars
 
     # 1.) Apply the distortion correction to the raw image.
-    dst = cv2.undistort(img, mtx, dist, None, mtx)
+    image = cv2.undistort(img, mtx, dist, None, mtx)
+    
 
     # 2.) Use color transforms, gradients, etc., to create a thresholded binary image.
     # Choose a Sobel kernel size
@@ -109,17 +145,26 @@ def pipeline(cal_vars, img):
     # Apply each of the thresholding functions
     gradx = abs_sobel_thresh(image, orient='x', sobel_kernel=ksize, thresh=(0, 255))
     grady = abs_sobel_thresh(image, orient='y', sobel_kernel=ksize, thresh=(0, 255))
-    mag_binary = mag_thresh(image, sobel_kernel=ksize, mag_thresh=(0, 255))
+    mag_binary = mag_thresh(   image, sobel_kernel=ksize, mag_thresh=(0, 255))
     dir_binary = dir_threshold(image, sobel_kernel=ksize, thresh=(0, np.pi/2))
+    hls_binary = hls_select(image, thresh=(0, 255))
     combined = np.zeros_like(dir_binary)
-    combined[((gradx == 1) & (grady == 1)) | ((mag_binary == 1) & (dir_binary == 1))] = 1
+    combined[((gradx == 1) & (grady == 1)) | ((mag_binary == 1) & (dir_binary == 1)) | (hls_binary == 1)] = 1
 
-    # 3.) Apply a perspective transform to rectify binary image ("birds-eye view").
+    # 3.) TODO: Apply a perspective transform to rectify binary image ("birds-eye view").
+    # NOTE: Need to find src and dst points, perhaps automatically? can we use some static ones and be correct?
+    src = corners[0:4] #np.float32([[,],[,],[,],[,]])
+                 #Note: you could pick any four of the detected corners 
+                 # as long as those four corners define a rectangle
+                 #One especially smart way to do this would be to use four well-chosen
+                 # corners that were automatically detected during the undistortion steps
+                 #We recommend using the automatic detection of corners in your code
+    dst = corners[0:4] #np.float32([[,],[,],[,],[,]])
     M = cv2.getPerspectiveTransform(src, dst)
     Minv = cv2.getPerspectiveTransform(dst, src)
     warped = cv2.warpPerspective(img, M, img_size, flags=cv2.INTER_LINEAR)        
 
-    # 4.) Detect lane pixels and fit to find lane boundary. 
+    # 4.) TODO: Detect lane pixels and fit to find lane boundary. 
     histogram = np.sum(img[img.shape[0]/2:,:], axis=0)
     plt.plot(histogram)
 
@@ -168,7 +213,8 @@ def main():
     cal_vars = calibration()
     
     # TODO: For a series of test images (in the test_images folder in the repository): 
-    images = glob.glob('test_images/GO*.jpg')
+    images = glob.glob('test_images/test*.jpg')
+    print("Looking at images %s" % images)
     for idx, fname in enumerate(images):
         image = cv2.imread(fname)
         pipeline(cal_vars, image)
@@ -184,5 +230,5 @@ def main():
     #white_clip = clip1.fl_image(process_image) #NOTE: this function expects color images!!
 
 
-
-
+if __name__ == "__main__":
+    main()
