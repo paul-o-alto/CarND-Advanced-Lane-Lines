@@ -2,16 +2,18 @@ import numpy as np
 import cv2
 import glob
 import time
+import os
 import matplotlib.pyplot as plt
 import matplotlib.image  as mpimg
 from skimage.feature import hog
 from sklearn.svm import LinearSVC
+from sklearn.externals import joblib
 from sklearn.preprocessing import StandardScaler
 #from sklearn.model_selection import train_test_split # >= 0.18
 from sklearn.cross_validation import train_test_split
 from moviepy.editor import VideoFileClip
 
-MODEL=None
+MODEL_FILE= 'svm.pkl'
 
 def region_of_interest(img, vertices):
     """
@@ -156,25 +158,30 @@ def bin_spatial(img, color_space='RGB', size=(32, 32)):
     # Return the feature vector
     return features
 
+
+# Constants specific to hog
+ORIENT = 9
+PIX_PER_CELL = 8
+CELL_PER_BLOCK = 2
+
 # Define a function to return HOG features and visualization
-def get_hog_features(img, orient, pix_per_cell, cell_per_block, 
-                     vis=False, feature_vec=True):
+def get_hog_features(img, vis=False, feature_vec=True):
     if vis == True:
         features, hog_image = \
             hog(img, 
-                orientations=orient, 
-                pixels_per_cell=(pix_per_cell, pix_per_cell),
-                cells_per_block=(cell_per_block, cell_per_block), 
-                transform_sqrt=True, 
-                visualise=True, feature_vector=False)
+                orientations=ORIENT, 
+                pixels_per_cell=(PIX_PER_CELL, PIX_PER_CELL),
+                cells_per_block=(CELL_PER_BLOCK, CELL_PER_BLOCK), 
+                #transform_sqrt=True, 
+                visualise=True) #, feature_vector=False)
         return features, hog_image
     else:      
         features = hog(img, 
-                       orientations=orient, 
-                       pixels_per_cell=(pix_per_cell, pix_per_cell),
-                       cells_per_block=(cell_per_block, cell_per_block), 
-                       transform_sqrt=True, 
-                       visualise=False, feature_vector=feature_vec)
+                       orientations=ORIENT, 
+                       pixels_per_cell=(PIX_PER_CELL, PIX_PER_CELL),
+                       cells_per_block=(CELL_PER_BLOCK, CELL_PER_BLOCK), 
+                       #transform_sqrt=True, 
+                       visualise=False) #, feature_vector=feature_vec)
         return features
 
 # Define a function to extract features from a list of images
@@ -188,30 +195,38 @@ def extract_features(imgs, cspace='RGB', spatial_size=(32, 32),
         # Read in each one by one
         image = mpimg.imread(file)
         # apply color conversion if other than 'RGB'
+        hog_channel = 2 # 3rd channel (index)
         if cspace != 'RGB':
             if cspace == 'HSV':
                 feature_image = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+                # NOTE: Might need to change default hog_channel here
             elif cspace == 'LUV':
                 feature_image = cv2.cvtColor(image, cv2.COLOR_RGB2LUV)
             elif cspace == 'HLS':
                 feature_image = cv2.cvtColor(image, cv2.COLOR_RGB2HLS)
+                # NOTE: Might need to change default hog_channel here
             elif cspace == 'YUV':
                 feature_image = cv2.cvtColor(image, cv2.COLOR_RGB2YUV)
-        else: feature_image = np.copy(image)      
+        else: 
+            feature_image = np.copy(image)
+        
+        hog_features = get_hog_features(feature_image[:,:,hog_channel],
+                                        vis=False, feature_vec=True)
+        to_concat = (hog_features,)
+        spatial_features = None
+        hist_features = None          
         # Apply bin_spatial() to get spatial color features
-        if spatial_size: spatial_features = bin_spatial(feature_image, size=spatial_size)
+        if spatial_size: 
+            spatial_features = bin_spatial(feature_image, size=spatial_size)
+            to_concat += (spatial_features,)
         # Apply color_hist() also with a color space option now
-        if hist_bins and bins_range: 
+        if hist_bins and hist_range: 
             hist_features = color_hist(feature_image, 
                                        nbins=hist_bins, 
                                        bins_range=hist_range)
-        # Call get_hog_features() with vis=False, feature_vec=True
-        hog_features = get_hog_features(feature_image[:,:,hog_channel], orient, 
-                                        pix_per_cell, cell_per_block, 
-                                        vis=False, feature_vec=True)
+            to_concat += (hist_features,)
         # Append the new feature vector to the features list
-        features.append(np.concatenate((spatial_features, hist_features,
-                                        hog_features)))
+        features.append(np.concatenate(to_concat))
     # Return list of feature vectors
     return features
 
@@ -264,14 +279,18 @@ def train(cars, notcars):
     # color features, as well as histograms of color, to your HOG feature 
     # vector. (these default to true in extract_features when parameters
     # are provided)
-    car_features    = extract_features(cars, cspace='RGB',
-                                       spatial_size=(32, 32),
-                                       hist_bins=32,
-                                       hist_range=(0, 256))
-    notcar_features = extract_features(notcars, cspace='RGB',
-                                       spatial_size=(32, 32),
-                                       hist_bins=32,
-                                       hist_range=(0, 256)) 
+    print('# cars: %s, # not-cars: %s' % (len(cars), len(notcars)))
+    car_features    = extract_features(cars, cspace='HSV',
+                                       spatial_size=None, #(32, 32),
+                                       hist_bins=None, #32,
+                                       hist_range=None)#(0, 256))
+    # NOTE: HSV, best choice?
+    notcar_features = extract_features(notcars, cspace='HSV', 
+                                       spatial_size=None, #(32, 32),
+                                       hist_bins=None, #32,
+                                       hist_range=None) #(0, 256)) 
+    print('Car features: %s, Not-cars features: %s'
+          % (len(car_features), len(notcar_features)))
 
     # Create an array stack of feature vectors
     X = np.vstack((car_features, notcar_features)).astype(np.float64)
@@ -289,25 +308,30 @@ def train(cars, notcars):
 
 def pipeline(img):
 
-    if MODEL == None: 
-        raise Exception("No model provided, pipeline won't work!")
+    model = None
+    try:
+        model = joblib.load(MODEL_FILE) 
+    except Exception as e:
+        print('Got exception %s when trying to load model file' % e)
 
     # This part is optional (helps in avoiding searching the sky, for example)
-    masked_img = region_of_interest(img, vertices)
+    # img = region_of_interest(img, vertices)
 
     # Implement a sliding-window technique and use your trained classifier 
     # to search for vehicles in images.
-    window_list = slide_window(masked_img, x_start_stop=[None, None], y_start_stop=[None, None])
-
+    window_list = slide_window(img, x_start_stop=[0, img.shape[0]], y_start_stop=[0, img.shape[1]])
+    bboxes = window_list # is this true?
     # Run your pipeline on a video stream and create a heat map of recurring 
     # detections frame by frame to reject outliers and follow detected vehicles.
 
     # Estimate a bounding box for vehicles detected.
-    draw_boxes(img, bboxes, color=(0, 0, 255), thick=6)
+    out_img = draw_boxes(img, bboxes, color=(0, 0, 255), thick=6)
+
+    return out_img 
 
 def main():
     # Divide up into cars and notcars
-    images = glob.glob('*.jpeg')
+    images = glob.glob('./training_set/*/*/*.jpeg')
     cars = []
     notcars = []
     for image in images:
@@ -316,17 +340,16 @@ def main():
         else:
             cars.append(image)
 
-    orient = 9
-    pix_per_cell = 8
-    cell_per_block = 2
-
-    MODEL = train(cars, notcars)
+    if not os.path.isfile(MODEL_FILE):
+        model = train(cars, notcars)
+        joblib.dump(model, MODEL_FILE) 
+    
 
     # For processing video
-    challenge_output = 'extra.mp4'
-    clip2 = VideoFileClip('challenge.mp4')
-    challenge_clip = clip2.fl_image(pipeline)
-    #%time challenge_clip.write_videofile(challenge_output, audio=False)
+    output_file = 'out.mp4'
+    clip = VideoFileClip('project_video.mp4')
+    out_clip = clip.fl_image(pipeline)
+    out_clip.write_videofile(output_file, audio=False)
 
 if __name__ == '__main__':
     main()
