@@ -11,6 +11,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cross_validation import train_test_split
 from moviepy.editor import VideoFileClip
 
+MODEL=None
+
 def region_of_interest(img, vertices):
     """
     Applies an image mask.
@@ -52,7 +54,7 @@ def draw_boxes(img, bboxes, color=(0, 0, 255), thick=6):
 # window size (x and y dimensions),  
 # and overlap fraction (for both x and y)
 def slide_window(img, x_start_stop=[None, None], y_start_stop=[None, None], 
-                    xy_window=(64, 64), xy_overlap=(0.5, 0.5)):
+                 xy_window=(64, 64), xy_overlap=(0.5, 0.5)):
     # If x and/or y start/stop positions not defined, set to image size
     if x_start_stop[0] == None:
         x_start_stop[0] = 0
@@ -178,7 +180,7 @@ def get_hog_features(img, orient, pix_per_cell, cell_per_block,
 # Define a function to extract features from a list of images
 # Have this function call bin_spatial() and color_hist()
 def extract_features(imgs, cspace='RGB', spatial_size=(32, 32),
-                        hist_bins=32, hist_range=(0, 256)):
+                     hist_bins=32, hist_range=(0, 256)):
     # Create a list to append feature vectors to
     features = []
     # Iterate through the list of images
@@ -197,10 +199,12 @@ def extract_features(imgs, cspace='RGB', spatial_size=(32, 32),
                 feature_image = cv2.cvtColor(image, cv2.COLOR_RGB2YUV)
         else: feature_image = np.copy(image)      
         # Apply bin_spatial() to get spatial color features
-        spatial_features = bin_spatial(feature_image, size=spatial_size)
+        if spatial_size: spatial_features = bin_spatial(feature_image, size=spatial_size)
         # Apply color_hist() also with a color space option now
-        hist_features = color_hist(feature_image, 
-                                   nbins=hist_bins, bins_range=hist_range)
+        if hist_bins and bins_range: 
+            hist_features = color_hist(feature_image, 
+                                       nbins=hist_bins, 
+                                       bins_range=hist_range)
         # Call get_hog_features() with vis=False, feature_vec=True
         hog_features = get_hog_features(feature_image[:,:,hog_channel], orient, 
                                         pix_per_cell, cell_per_block, 
@@ -213,6 +217,7 @@ def extract_features(imgs, cspace='RGB', spatial_size=(32, 32),
 
 # Define a function to return some characteristics of the dataset 
 def data_look(car_list, notcar_list):
+
     data_dict = {}
     # Define a key in data_dict "n_cars" and store the number of car images
     data_dict["n_cars"] = len(car_list)
@@ -227,60 +232,7 @@ def data_look(car_list, notcar_list):
     # Return data_dict
     return data_dict
 
-def pipeline():
-    # Perform a Histogram of Oriented Gradients (HOG) feature extraction 
-    # on a labeled training set of images and train a classifier Linear 
-    # SVM classifier
-
-    # Optionally, you can also apply a color transform and append binned 
-    # color features, as well as histograms of color, to your HOG feature 
-    # vector.
-
-    # NOTE: for those first two steps don't forget to normalize your features 
-    # and randomize a selection for training and testing.
-
-    # Implement a sliding-window technique and use your trained classifier 
-    # to search for vehicles in images.
-
-    # Run your pipeline on a video stream and create a heat map of recurring 
-    # detections frame by frame to reject outliers and follow detected vehicles.
-
-    # Estimate a bounding box for vehicles detected.
-
-def main():
-    # Divide up into cars and notcars
-    images = glob.glob('*.jpeg')
-    cars = []
-    notcars = []
-    for image in images:
-        if 'image' in image or 'extra' in image:
-            notcars.append(image)
-        else:
-            cars.append(image)
-
-    orient = 9
-    pix_per_cell = 8
-    cell_per_block = 2
-
-    car_features    = extract_features(cars, cspace='RGB', 
-                                       spatial_size=(32, 32),
-                                       hist_bins=32, 
-                                       hist_range=(0, 256))
-    notcar_features = extract_features(notcars, cspace='RGB', 
-                                       spatial_size=(32, 32),
-                                       hist_bins=32, 
-                                       hist_range=(0, 256))
-
-    # Create an array stack of feature vectors
-    X = np.vstack((car_features, notcar_features)).astype(np.float64)                        
-    # Fit a per-column scaler
-    X_scaler = StandardScaler().fit(X)
-    # Apply the scaler to X
-    scaled_X = X_scaler.transform(X)
-
-    # Define the labels vector
-    y = np.hstack((np.ones(len(car_features)), np.zeros(len(notcar_features))))
-
+def train_svm(scaled_X, y):
 
     # Split up data into randomized training and test sets
     rand_state = np.random.randint(0, 100)
@@ -303,8 +255,78 @@ def main():
     t2 = time.time()
     print(t2-t, 'Seconds to predict with SVC')
 
+    return svc
+
+def train(cars, notcars):
+    # Perform a Histogram of Oriented Gradients (HOG) feature extraction 
+    # on a labeled training set of images
+    # Optionally, you can also apply a color transform and append binned 
+    # color features, as well as histograms of color, to your HOG feature 
+    # vector. (these default to true in extract_features when parameters
+    # are provided)
+    car_features    = extract_features(cars, cspace='RGB',
+                                       spatial_size=(32, 32),
+                                       hist_bins=32,
+                                       hist_range=(0, 256))
+    notcar_features = extract_features(notcars, cspace='RGB',
+                                       spatial_size=(32, 32),
+                                       hist_bins=32,
+                                       hist_range=(0, 256)) 
+
+    # Create an array stack of feature vectors
+    X = np.vstack((car_features, notcar_features)).astype(np.float64)
+    # Fit a per-column scaler
+    X_scaler = StandardScaler().fit(X)
+    # Apply the scaler to X
+    scaled_X = X_scaler.transform(X)
+
+    # Define the labels vector
+    y = np.hstack((np.ones(len(car_features)), np.zeros(len(notcar_features))))
+
+    # ...and train a classifier Linear SVM classifier
+    model = train_svm(scaled_X, y)
+    return model
+
+def pipeline(img):
+
+    if MODEL == None: 
+        raise Exception("No model provided, pipeline won't work!")
+
+    # This part is optional (helps in avoiding searching the sky, for example)
+    masked_img = region_of_interest(img, vertices)
+
+    # Implement a sliding-window technique and use your trained classifier 
+    # to search for vehicles in images.
+    window_list = slide_window(masked_img, x_start_stop=[None, None], y_start_stop=[None, None])
+
+    # Run your pipeline on a video stream and create a heat map of recurring 
+    # detections frame by frame to reject outliers and follow detected vehicles.
+
+    # Estimate a bounding box for vehicles detected.
+    draw_boxes(img, bboxes, color=(0, 0, 255), thick=6)
+
+def main():
+    # Divide up into cars and notcars
+    images = glob.glob('*.jpeg')
+    cars = []
+    notcars = []
+    for image in images:
+        if 'image' in image or 'extra' in image:
+            notcars.append(image)
+        else:
+            cars.append(image)
+
+    orient = 9
+    pix_per_cell = 8
+    cell_per_block = 2
+
+    MODEL = train(cars, notcars)
+
     # For processing video
     challenge_output = 'extra.mp4'
     clip2 = VideoFileClip('challenge.mp4')
-    challenge_clip = clip2.fl_image(process_image)
+    challenge_clip = clip2.fl_image(pipeline)
     #%time challenge_clip.write_videofile(challenge_output, audio=False)
+
+if __name__ == '__main__':
+    main()

@@ -1,6 +1,8 @@
 import glob
 import numpy as np
 import cv2
+import pickle
+import matplotlib.pyplot as plt
 
 # Define a function that takes an image, gradient orientation,
 # and threshold min / max values.
@@ -27,7 +29,7 @@ def abs_sobel_thresh(img, sobel_kernel=3, orient='x', thresh_min=0, thresh_max=2
 # for a given sobel kernel size and threshold values
 def mag_thresh(img, sobel_kernel=3, mag_thresh=(0, 255)):
     # Convert to grayscale
-    #gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     # Take both Sobel x and y gradients
     sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
     sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
@@ -96,8 +98,8 @@ def calibration():
             #cv2.waitKey(1) #500)
 
     cv2.destroyAllWindows()
-    print("objpoints = %s" % objpoints)
-    print("imgpoints = %s" % imgpoints)
+    #print("objpoints = %s" % objpoints)
+    #print("imgpoints = %s" % imgpoints)
     return cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1],None,None)
  
 # Define a function that thresholds the S-channel of HLS
@@ -130,43 +132,52 @@ def project_onto(img):
     result = cv2.addWeighted(undist, 1, newwarp, 0.3, 0)
     plt.imshow(result)
 
-def pipeline(cal_vars, img):
+def pipeline(cal_vars, src_img):
 
     # TODO: LOOK BACK AT PROJECT 1 for more useful code
     ret, mtx, dist, rvecs, tvecs = cal_vars
 
     # 1.) Apply the distortion correction to the raw image.
-    image = cv2.undistort(img, mtx, dist, None, mtx)
-    
+    image = cv2.undistort(src_img, mtx, dist, None, mtx)
+    #plt.imshow(image); plt.show()
+    #corners = cv2.undistortPoints(image, mtx, dist)    
 
     # 2.) Use color transforms, gradients, etc., to create a thresholded binary image.
     # Choose a Sobel kernel size
-    ksize = 3 # Choose a larger odd number to smooth gradient measurements
+    ksize = 9 # Choose a larger odd number to smooth gradient measurements
     # Apply each of the thresholding functions
-    gradx = abs_sobel_thresh(image, orient='x', sobel_kernel=ksize, thresh=(0, 255))
-    grady = abs_sobel_thresh(image, orient='y', sobel_kernel=ksize, thresh=(0, 255))
-    mag_binary = mag_thresh(   image, sobel_kernel=ksize, mag_thresh=(0, 255))
-    dir_binary = dir_threshold(image, sobel_kernel=ksize, thresh=(0, np.pi/2))
-    hls_binary = hls_select(image, thresh=(0, 255))
+    gradx = abs_sobel_thresh(image, orient='x', sobel_kernel=ksize, thresh_min=1, thresh_max=255)
+    grady = abs_sobel_thresh(image, orient='y', sobel_kernel=ksize, thresh_min=1, thresh_max=255)
+    mag_binary = mag_thresh(   image, sobel_kernel=ksize, mag_thresh=(1, 255))
+    #plt.imshow(gradx); plt.show()
+    dir_binary = dir_threshold(image, sobel_kernel=ksize, thresh=(0.01, np.pi/2))
+    hls_binary = hls_select(image, thresh=(1, 255))
+    plt.imshow(hls_binary); plt.show()
     combined = np.zeros_like(dir_binary)
     combined[((gradx == 1) & (grady == 1)) | ((mag_binary == 1) & (dir_binary == 1)) | (hls_binary == 1)] = 1
+    img_size = combined.shape
+    plt.imshow(combined)
+    plt.show()
 
-    # 3.) TODO: Apply a perspective transform to rectify binary image ("birds-eye view").
+    # 3.) Apply a perspective transform to rectify binary image ("birds-eye view").
     # NOTE: Need to find src and dst points, perhaps automatically? can we use some static ones and be correct?
-    src = corners[0:4] #np.float32([[,],[,],[,],[,]])
-                 #Note: you could pick any four of the detected corners 
-                 # as long as those four corners define a rectangle
-                 #One especially smart way to do this would be to use four well-chosen
-                 # corners that were automatically detected during the undistortion steps
-                 #We recommend using the automatic detection of corners in your code
-    dst = corners[0:4] #np.float32([[,],[,],[,],[,]])
+    #src = corners[0:4] 720 1280 y, x
+    src = np.float32([[360,640],[720,100],[720,1180],[360,740]])
+    # NOTE: you could pick any four of the detected corners 
+    # as long as those four corners define a rectangle
+    #One especially smart way to do this would be to use four well-chosen
+    # corners that were automatically detected during the undistortion steps
+    #We recommend using the automatic detection of corners in your code
+    #dst = corners[0:4] 
+    dst = np.float32([[0,0],[720,0],[720,1280],[0,1280]])
     M = cv2.getPerspectiveTransform(src, dst)
     Minv = cv2.getPerspectiveTransform(dst, src)
-    warped = cv2.warpPerspective(img, M, img_size, flags=cv2.INTER_LINEAR)        
+    warped = cv2.warpPerspective(combined, M, img_size, flags=cv2.INTER_LINEAR)        
 
     # 4.) TODO: Detect lane pixels and fit to find lane boundary. 
-    histogram = np.sum(img[img.shape[0]/2:,:], axis=0)
+    histogram = np.sum(combined[combined.shape[0]/2:,:], axis=0)
     plt.plot(histogram)
+    plt.show()
 
     # 5.) Determine curvature of the lane and vehicle position with respect to center.
     # Fit a second order polynomial to each fake lane line
@@ -210,8 +221,19 @@ def pipeline(cal_vars, img):
 
 def main():
 
-    cal_vars = calibration()
-    
+    # So we don't have to calibrate every time
+    try:
+        with open('./cal_vars.p', 'rb') as _input:
+            cal_vars = pickle.load(_input)
+        print('Successfully loaded prior calibration variables')
+    except Exception as e:
+        print('Got exception %s when trying to load calibration variables' % e)
+        print('No saved calibration variables, calibrating now (saving for future use)')
+        cal_vars = calibration()
+        with open('./cal_vars.p', 'wb') as output:
+            pickle.dump(cal_vars, output)    
+        
+ 
     # TODO: For a series of test images (in the test_images folder in the repository): 
     images = glob.glob('test_images/test*.jpg')
     print("Looking at images %s" % images)
