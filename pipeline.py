@@ -110,7 +110,9 @@ def hls_select(img, thresh=(0, 255)):
     binary_output[(s_channel > thresh[0]) & (s_channel <= thresh[1])] = 1
     return binary_output
 
-def project_onto(img):
+def project_onto(unwarped, warped, Minv, 
+                 left_fitx, right_fitx, yvals):
+
     # Create an image to draw the lines on
     warp_zero = np.zeros_like(warped).astype(np.uint8)
     color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
@@ -127,71 +129,109 @@ def project_onto(img):
     # Warp the blank back to original image space using 
     # inverse perspective matrix (Minv)
     newwarp = cv2.warpPerspective(
-                  color_warp, Minv, (image.shape[1], image.shape[0])) 
+                  color_warp, Minv, image.shape[0:2]) 
     # Combine the result with the original image
-    result = cv2.addWeighted(undist, 1, newwarp, 0.3, 0)
+    result = cv2.addWeighted(unwarped, 1, newwarp, 0.3, 0)
     plt.imshow(result)
+
+    return result
 
 def pipeline(cal_vars, src_img):
 
     # TODO: LOOK BACK AT PROJECT 1 for more useful code
     ret, mtx, dist, rvecs, tvecs = cal_vars
 
-    # 1.) Apply the distortion correction to the raw image.
+    #plt.imshow(src_img); plt.show()
+    print("Applying the distortion correction to the raw image.")
     image = cv2.undistort(src_img, mtx, dist, None, mtx)
-    #plt.imshow(image); plt.show()
+    plt.imshow(image); plt.show() 
     #corners = cv2.undistortPoints(image, mtx, dist)    
 
-    # 2.) Use color transforms, gradients, etc., to create a thresholded binary image.
-    # Choose a Sobel kernel size
-    ksize = 9 # Choose a larger odd number to smooth gradient measurements
-    # Apply each of the thresholding functions
-    gradx = abs_sobel_thresh(image, orient='x', sobel_kernel=ksize, thresh_min=1, thresh_max=255)
-    grady = abs_sobel_thresh(image, orient='y', sobel_kernel=ksize, thresh_min=1, thresh_max=255)
-    mag_binary = mag_thresh(   image, sobel_kernel=ksize, mag_thresh=(1, 255))
-    #plt.imshow(gradx); plt.show()
-    dir_binary = dir_threshold(image, sobel_kernel=ksize, thresh=(0.01, np.pi/2))
-    hls_binary = hls_select(image, thresh=(1, 255))
-    plt.imshow(hls_binary); plt.show()
-    combined = np.zeros_like(dir_binary)
-    combined[((gradx == 1) & (grady == 1)) | ((mag_binary == 1) & (dir_binary == 1)) | (hls_binary == 1)] = 1
-    img_size = combined.shape
-    plt.imshow(combined)
-    plt.show()
 
-    # 3.) Apply a perspective transform to rectify binary image ("birds-eye view").
-    # NOTE: Need to find src and dst points, perhaps automatically? can we use some static ones and be correct?
+
+    print("Applying a perspective transform to rectify binary image")
+    print(" (make it a birds-eye view)")
+    # NOTE: Need to find src and dst points, perhaps automatically? 
+    #       can we use some static ones and be correct?
     #src = corners[0:4] 720 1280 y, x
     src = np.float32([[360,640],[720,100],[720,1180],[360,740]])
     # NOTE: you could pick any four of the detected corners 
     # as long as those four corners define a rectangle
-    #One especially smart way to do this would be to use four well-chosen
-    # corners that were automatically detected during the undistortion steps
+    # One especially smart way to do this would be to use 
+    # four well-chosen
+    # corners that were automatically detected during the 
+    # undistortion steps
     #We recommend using the automatic detection of corners in your code
     #dst = corners[0:4] 
     dst = np.float32([[0,0],[720,0],[720,1280],[0,1280]])
     M = cv2.getPerspectiveTransform(src, dst)
     Minv = cv2.getPerspectiveTransform(dst, src)
-    warped = cv2.warpPerspective(combined, M, img_size, flags=cv2.INTER_LINEAR)        
+    img_size = image.shape[0:2]
+    warped_image = cv2.warpPerspective(image, M, img_size,
+                                       flags=cv2.INTER_LINEAR)
 
-    # 4.) TODO: Detect lane pixels and fit to find lane boundary. 
-    histogram = np.sum(combined[combined.shape[0]/2:,:], axis=0)
-    plt.plot(histogram)
+
+    print("Using color transforms, gradients, etc.")
+    print("to create a thresholded binary image.")
+    # Choose a Sobel kernel size
+    ksize = 11 
+    # Choose an odd number >= 3 to smooth gradient measurements
+
+    # Apply each of the thresholding functions
+    gradx = abs_sobel_thresh(warped_image, orient='y', 
+                             sobel_kernel=ksize, 
+                             thresh_min=50, thresh_max=200)
+    #plt.imshow(gradx); plt.show()
+    grady = abs_sobel_thresh(warped_image, orient='x', 
+                             sobel_kernel=ksize, 
+                             thresh_min=50, thresh_max=200)
+    #plt.imshow(grady); plt.show()
+    mag_binary = mag_thresh(warped_image, sobel_kernel=ksize, 
+                            mag_thresh=(50, 200))
+    #plt.imshow(mag_binary); plt.show()
+    dir_binary = dir_threshold(warped_image, sobel_kernel=ksize, 
+                               thresh=(1, np.pi/2))
+    hls_binary = hls_select(warped_image, thresh=(100, 255))
+    #plt.imshow(hls_binary); plt.show()
+    combined = np.zeros_like(dir_binary)
+    combined[((gradx == 1) & (grady == 1)) | 
+             ((mag_binary == 1) & (dir_binary == 1)) |  
+             (hls_binary == 1)] = 1
+    plt.imshow(combined)
     plt.show()
 
-    # 5.) Determine curvature of the lane and vehicle position with respect to center.
+
+    print("Detecting lane pixels and fitting to find lane boundary.")
+    yvals = np.sum(combined[combined.shape[0]/2:,:], axis=0)
+    plt.plot(yvals)
+    plt.show()
+
+    # What if one lane is detected much more strongly?
+    search_y = np.copy(yvals)
+    leftx  = np.argmax(search_y)
+    rightx = np.argmax(np.flipud(search_y))
+    if rightx == leftx:
+        search_y[rightx] = 0
+        rightx = np.argmax(np.flipud(search_y)) 
+
+    search_range = 100
+    print("Determine curvature of the lane and vehicle position")
+    print("with respect to center.") # TODO
     # Fit a second order polynomial to each fake lane line
-    left_fit = np.polyfit(yvals, leftx, 2)
+    print(yvals, leftx, rightx)
+    leftx_s = np.linspace(leftx-search_range, leftx+search_range, num=len(yvals))
+    left_fit = np.polyfit(yvals, leftx_s, 2)
     left_fitx = left_fit[0]*yvals**2 + left_fit[1]*yvals + left_fit[2]
-    right_fit = np.polyfit(yvals, rightx, 2)
+    rightx_s = np.linspace(rightx-search_range, rightx+search_range, num=len(yvals))
+    right_fit = np.polyfit(yvals, rightx_s, 2)
     right_fitx = right_fit[0]*yvals**2 + right_fit[1]*yvals + right_fit[2]
     # Plot up the data # FOR DEBUG
-    plt.plot(leftx, yvals, 'o', color='red')
-    plt.plot(rightx, yvals, 'o', color='blue')
+    plt.plot(leftx_s, yvals, 'o', color='red')
+    plt.plot(rightx_s, yvals, 'o', color='blue')
     plt.xlim(0, 1280)
     plt.ylim(0, 720)
-    plt.plot(left_fitx, yvals, color='green', linewidth=3)
-    plt.plot(right_fitx, yvals, color='green', linewidth=3)
+    plt.plot(left_fitx, yvals, color='yellow', linewidth=10)
+    plt.plot(right_fitx, yvals, color='white', linewidth=10)
     plt.gca().invert_yaxis() # to visualize as we do the images
     y_eval = np.max(yvals)
     left_curverad = ((1 + (2*left_fit[0]*y_eval + left_fit[1])**2)**1.5) \
@@ -200,23 +240,13 @@ def pipeline(cal_vars, src_img):
                                 /np.absolute(2*right_fit[0])
     print(left_curverad, right_curverad)
 
+    print("Warp the detected lane boundaries back onto the original image.")
+    result = project_onto(image, warped_image, Minv, 
+                          left_fitx, right_fitx, yvals)
 
-    # 6.) Warp the detected lane boundaries back onto the original image.
-    warp_zero = np.zeros_like(warped).astype(np.uint8)
-    color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
-    # Recast the x and y points into usable format for cv2.fillPoly()
-    pts_left = np.array([np.transpose(np.vstack([left_fitx, yvals]))])
-    pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, yvals])))])
-    pts = np.hstack((pts_left, pts_right))
-    # Draw the lane onto the warped blank image
-    cv2.fillPoly(color_warp, np.int_([pts]), (0,255, 0))
-    # Warp the blank back to original image space using inverse perspective matrix (Minv)
-    newwarp = cv2.warpPerspective(color_warp, Minv, (image.shape[1], image.shape[0])) 
-    # Combine the result with the original image
-    result = cv2.addWeighted(undist, 1, newwarp, 0.3, 0)
-    plt.imshow(result)
-
-    # 7.) Output visual display of the lane boundaries and numerical estimation of lane curvature and vehicle position.
+    print("Output visual display of the lane boundaries and numerical estimation ")
+    print("of lane curvature and vehicle position.")
+    plt.imshow(result); plt.show()
     return result #TODO: Finish this section
 
 def main():
