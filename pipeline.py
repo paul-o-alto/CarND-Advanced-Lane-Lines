@@ -92,16 +92,7 @@ def calibration():
             objpoints.append(objp)
             imgpoints.append(corners)
 
-            # Draw and display the corners
-            #cv2.drawChessboardCorners(img, (8,6), corners, ret)
-            #write_name = 'corners_found'+str(idx)+'.jpg'
-            #cv2.imwrite(write_name, img)
-            #cv2.imshow('img', img)
-            #cv2.waitKey(1) #500)
-
     cv2.destroyAllWindows()
-    #print("objpoints = %s" % objpoints)
-    #print("imgpoints = %s" % imgpoints)
     return cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1],None,None)
  
 # Define a function that thresholds the S-channel of HLS
@@ -218,11 +209,13 @@ def pipeline(cal_vars, src_img, optimize=False):
 
     ret, mtx, dist, rvecs, tvecs = cal_vars
 
-    #plt.imshow(src_img); plt.show()
+    plt.imshow(src_img); plt.show()
     print("Applying the distortion correction to the raw image.")
     image = cv2.undistort(src_img, mtx, dist, None, mtx)
-    plt.imshow(image); plt.show() 
-    #corners = cv2.undistortPoints(image, mtx, dist)    
+    print("shape: %s", image.shape) #plt.imshow(image); plt.show()
+    src = np.float32([[180,720],[1200,720],[780,450],[550,450]])
+    #dst = None
+    #corners = cv2.undistortPoints(image, dst,  mtx, dist)    
 
 
 
@@ -230,8 +223,6 @@ def pipeline(cal_vars, src_img, optimize=False):
     print(" (make it a birds-eye view)")
     # NOTE: Need to find src and dst points, perhaps automatically? 
     #       can we use some static ones and be correct?
-    #src = corners[0:4] 720 1280 y, x
-    src = np.float32([[360,640],[720,100],[720,1180],[360,740]])
     # NOTE: you could pick any four of the detected corners 
     # as long as those four corners define a rectangle
     # One especially smart way to do this would be to use 
@@ -239,49 +230,48 @@ def pipeline(cal_vars, src_img, optimize=False):
     # corners that were automatically detected during the 
     # undistortion steps
     #We recommend using the automatic detection of corners in your code
-    #dst = corners[0:4] 
-    dst = np.float32([[0,0],[720,0],[720,1280],[0,1280]])
+    dst = np.float32([[0,720],[1280,720],[1280,0],[0,0]])
     M = cv2.getPerspectiveTransform(src, dst)
     Minv = cv2.getPerspectiveTransform(dst, src)
     img_size = image.shape[0:2]
+    img_size = img_size[::-1] # Reverse order
     warped_image = cv2.warpPerspective(image, M, img_size,
                                        flags=cv2.INTER_LINEAR)
-
+    if DEBUG: print('warped_image'); plt.imshow(warped_image); plt.show()
 
     print("Using color transforms, gradients, etc.")
     print("to create a thresholded binary image.")
     # Choose a Sobel kernel size
-    ksize = 11 
+    ksize = 3#11 
     # Choose an odd number >= 3 to smooth gradient measurements
 
     # Apply each of the thresholding functions
-    gradx = abs_sobel_thresh(warped_image, orient='y', 
+    gradx = abs_sobel_thresh(warped_image, orient='x', 
                              sobel_kernel=ksize, 
                              thresh_min=50, thresh_max=200)
-    #plt.imshow(gradx); plt.show()
-    grady = abs_sobel_thresh(warped_image, orient='x', 
+    if DEBUG: print('abs_sobel_thresh y GOOD'); plt.imshow(gradx); plt.show()
+    grady = abs_sobel_thresh(warped_image, orient='y', 
                              sobel_kernel=ksize, 
                              thresh_min=50, thresh_max=200)
-    #plt.imshow(grady); plt.show()
+    if DEBUG: print('abs_sobel_thresh y'); plt.imshow(grady); plt.show()
     mag_binary = mag_thresh(warped_image, sobel_kernel=ksize, 
                             mag_thresh=(50, 200))
-    #plt.imshow(mag_binary); plt.show()
+    if DEBUG: print('mag_thresh'); plt.imshow(mag_binary); plt.show()
     dir_binary = dir_threshold(warped_image, sobel_kernel=ksize, 
-                               thresh=(1, np.pi/2))
-    hls_binary = hls_select(warped_image, thresh=(100, 255))
-    #plt.imshow(hls_binary); plt.show()
-    combined = np.zeros_like(dir_binary)
+                               thresh=(0.1, np.pi/2))
+    if DEBUG: print('dir_binary'); plt.imshow(dir_binary); plt.show()
+    hls_binary = hls_select(warped_image, thresh=(100, 200))
+    if DEBUG: print('hls_select'); plt.imshow(hls_binary); plt.show()
+    combined = np.zeros_like(gradx) #dir_binary)
     combined[((gradx == 1) & (grady == 1)) | 
-             ((mag_binary == 1) & (dir_binary == 1)) |  
-             (hls_binary == 1)] = 1
-    plt.imshow(combined)
-    plt.show()
+             ((mag_binary == 1) & (dir_binary == 1)) | (hls_binary == 1)
+            ] = 1
+    if DEBUG: print('Combined warped binary img'); plt.imshow(combined); plt.show()
 
     # Identify the x and y positions of all nonzero pixels in the image
     nonzero = combined.nonzero()
     nonzeroy = np.array(nonzero[0])
     nonzerox = np.array(nonzero[1])
-
 
     print("Detecting lane pixels and fitting to find lane boundary.")
     histogram = np.sum(combined[combined.shape[0]/2:,:], axis=0)
@@ -326,8 +316,8 @@ def pipeline(cal_vars, src_img, optimize=False):
 
     print("Output visual display of the lane boundaries and numerical estimation ")
     print("of lane curvature and vehicle position.")
-    if DEBUG: plt.imshow(result); plt.show()
-    return result #TODO: Finish this section
+    plt.imshow(result); plt.show()
+    return result 
 
 def process_image():
     # TODO: Implement a generator for video clips?
