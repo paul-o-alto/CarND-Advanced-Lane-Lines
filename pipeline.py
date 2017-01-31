@@ -3,8 +3,12 @@ import numpy as np
 import cv2
 import pickle
 import matplotlib.pyplot as plt
+from moviepy.editor import VideoFileClip
 
-DEBUG = True
+DEBUG = False #True
+OPTIMIZE = False # Starting value
+LEFT_FIT, RIGHT_FIT = None, None # Current lines
+CAL_VARS = None
 
 # Define a function that takes an image, gradient orientation,
 # and threshold min / max values.
@@ -105,20 +109,20 @@ def hls_select(img, thresh=(0, 255)):
 
 
 # Set the width of the windows +/- margin
-MARGIN = 100
+MARGIN = 75 #100
 # Set minimum number of pixels found to recenter window
 MINPIX = 50
 
-def visualize(out_img, binary_warped, Minv, 
+def visualize(original_img, warped_img, Minv, 
               fit_leftx, fit_rightx, fity, 
               nonzerox, nonzeroy, 
               left_lane_inds, right_lane_inds):
 
     # Create an image to draw on and an image to show the selection window
-    window_img = np.zeros_like(out_img)
+    window_img = np.zeros_like(original_img)
     # Color in left and right line pixels
-    out_img[nonzeroy[left_lane_inds], nonzerox[left_lane_inds]] = [255, 0, 0]
-    out_img[nonzeroy[right_lane_inds], nonzerox[right_lane_inds]] = [0, 0, 255]
+    window_img[nonzeroy[left_lane_inds], nonzerox[left_lane_inds]] = [255, 0, 0]
+    window_img[nonzeroy[right_lane_inds], nonzerox[right_lane_inds]] = [0, 0, 255]
 
     # Generate a polygon to illustrate the search window area
     # And recast the x and y points into usable format for cv2.fillPoly()
@@ -132,12 +136,21 @@ def visualize(out_img, binary_warped, Minv,
     # Draw the lane onto the warped blank image
     cv2.fillPoly(window_img, np.int_([left_line_pts]), (0,255, 0))
     cv2.fillPoly(window_img, np.int_([right_line_pts]), (0,255, 0))
-    result = cv2.addWeighted(out_img, 1, window_img, 0.3, 0)
-    plt.imshow(result)
-    plt.plot(fit_leftx, fity, color='yellow')
-    plt.plot(fit_rightx, fity, color='yellow')
-    plt.xlim(0, 1280)
-    plt.ylim(720, 0)
+    #result = cv2.addWeighted(warped_img, 1, window_img, 0.3, 0)
+
+    img_size = window_img.shape[0:2]
+    img_size = img_size[::-1] # Reverse order
+    window_img = cv2.warpPerspective(window_img, Minv, img_size,
+                                     flags=cv2.INTER_LINEAR)
+
+    result = cv2.addWeighted(original_img, 1, window_img, 0.3, 0)
+
+    if DEBUG:
+        plt.imshow(result)
+        plt.plot(fit_leftx, fity, color='yellow')
+        plt.plot(fit_rightx, fity, color='yellow')
+        plt.xlim(0, 1280)
+        plt.ylim(720, 0)
 
     return result
 
@@ -198,49 +211,38 @@ def optimized_search(binary_warped, left_fit, right_fit):
     nonzero = binary_warped.nonzero()
     nonzeroy = np.array(nonzero[0])
     nonzerox = np.array(nonzero[1])
-    left_lane_inds  = ((nonzerox > (left_fit[0]*(nonzeroy**2) + left_fit[1]*nonzeroy + left_fit[2] - MARGIN)) 
-                     & (nonzerox < (left_fit[0]*(nonzeroy**2) + left_fit[1]*nonzeroy + left_fit[2] + MARGIN))) 
-    right_lane_inds = ((nonzerox > (right_fit[0]*(nonzeroy**2) + right_fit[1]*nonzeroy + right_fit[2] - MARGIN)) 
-                     & (nonzerox < (right_fit[0]*(nonzeroy**2) + right_fit[1]*nonzeroy + right_fit[2] + MARGIN)))  
+
+    # Return these as 1-item lists, for consistency with the return value of the sliding window function
+    left_lane_inds  = [(((nonzerox > (left_fit[0]*(nonzeroy**2) + left_fit[1]*nonzeroy + left_fit[2] - MARGIN)) 
+                      & (nonzerox < (left_fit[0]*(nonzeroy**2) + left_fit[1]*nonzeroy + left_fit[2] + MARGIN))).nonzero()[0])]
+    right_lane_inds = [(((nonzerox > (right_fit[0]*(nonzeroy**2) + right_fit[1]*nonzeroy + right_fit[2] - MARGIN)) 
+                      & (nonzerox < (right_fit[0]*(nonzeroy**2) + right_fit[1]*nonzeroy + right_fit[2] + MARGIN))).nonzero()[0])]
 
     return left_lane_inds, right_lane_inds
 
-def pipeline(cal_vars, src_img, optimize=False):
+def pipeline(src_img):
 
-    ret, mtx, dist, rvecs, tvecs = cal_vars
+    global OPTIMIZE, LEFT_FIT, RIGHT_FIT
+    ret, mtx, dist, rvecs, tvecs = CAL_VARS
 
-    plt.imshow(src_img); plt.show()
-    print("Applying the distortion correction to the raw image.")
-    image = cv2.undistort(src_img, mtx, dist, None, mtx)
-    print("shape: %s", image.shape) #plt.imshow(image); plt.show()
-    src = np.float32([[180,720],[1200,720],[780,450],[550,450]])
-    #dst = None
-    #corners = cv2.undistortPoints(image, dst,  mtx, dist)    
-
-
-
-    print("Applying a perspective transform to rectify binary image")
-    print(" (make it a birds-eye view)")
-    # NOTE: Need to find src and dst points, perhaps automatically? 
-    #       can we use some static ones and be correct?
-    # NOTE: you could pick any four of the detected corners 
-    # as long as those four corners define a rectangle
-    # One especially smart way to do this would be to use 
-    # four well-chosen
-    # corners that were automatically detected during the 
-    # undistortion steps
-    #We recommend using the automatic detection of corners in your code
+    #plt.imshow(src_img); plt.show()
+    #print("Applying the distortion correction to the raw image.")
+    original_image = cv2.undistort(src_img, mtx, dist, None, mtx)
+    src = np.float32([[180,620],[1200,620],[840,450],[440,450]])
     dst = np.float32([[0,720],[1280,720],[1280,0],[0,0]])
+    # One especially smart way to do this would be to use 
+    # four well-chosen corners that were automatically detected during the 
+    # undistortion steps
     M = cv2.getPerspectiveTransform(src, dst)
     Minv = cv2.getPerspectiveTransform(dst, src)
-    img_size = image.shape[0:2]
+    img_size = original_image.shape[0:2]
     img_size = img_size[::-1] # Reverse order
-    warped_image = cv2.warpPerspective(image, M, img_size,
+    warped_image = cv2.warpPerspective(original_image, M, img_size,
                                        flags=cv2.INTER_LINEAR)
     if DEBUG: print('warped_image'); plt.imshow(warped_image); plt.show()
 
-    print("Using color transforms, gradients, etc.")
-    print("to create a thresholded binary image.")
+    #print("Using color transforms, gradients, etc.")
+    #print("to create a thresholded binary image.")
     # Choose a Sobel kernel size
     ksize = 3#11 
     # Choose an odd number >= 3 to smooth gradient measurements
@@ -248,23 +250,24 @@ def pipeline(cal_vars, src_img, optimize=False):
     # Apply each of the thresholding functions
     gradx = abs_sobel_thresh(warped_image, orient='x', 
                              sobel_kernel=ksize, 
-                             thresh_min=50, thresh_max=200)
-    if DEBUG: print('abs_sobel_thresh y GOOD'); plt.imshow(gradx); plt.show()
+                             thresh_min=100, thresh_max=200)
+    if DEBUG: print('abs_sobel_thresh x'); plt.imshow(gradx); plt.show()
     grady = abs_sobel_thresh(warped_image, orient='y', 
                              sobel_kernel=ksize, 
-                             thresh_min=50, thresh_max=200)
+                             thresh_min=100, thresh_max=200)
     if DEBUG: print('abs_sobel_thresh y'); plt.imshow(grady); plt.show()
     mag_binary = mag_thresh(warped_image, sobel_kernel=ksize, 
-                            mag_thresh=(50, 200))
+                            mag_thresh=(75, 200))
     if DEBUG: print('mag_thresh'); plt.imshow(mag_binary); plt.show()
     dir_binary = dir_threshold(warped_image, sobel_kernel=ksize, 
                                thresh=(0.1, np.pi/2))
     if DEBUG: print('dir_binary'); plt.imshow(dir_binary); plt.show()
-    hls_binary = hls_select(warped_image, thresh=(100, 200))
+    hls_binary = hls_select(warped_image, thresh=(100, 255))
     if DEBUG: print('hls_select'); plt.imshow(hls_binary); plt.show()
-    combined = np.zeros_like(gradx) #dir_binary)
-    combined[((gradx == 1) & (grady == 1)) | 
-             ((mag_binary == 1) & (dir_binary == 1)) | (hls_binary == 1)
+    combined = np.zeros_like(gradx) 
+    combined[((gradx == 1) & (grady == 1)) 
+             | ((mag_binary == 1) & (dir_binary == 1)) 
+             | (hls_binary == 1)
             ] = 1
     if DEBUG: print('Combined warped binary img'); plt.imshow(combined); plt.show()
 
@@ -273,7 +276,7 @@ def pipeline(cal_vars, src_img, optimize=False):
     nonzeroy = np.array(nonzero[0])
     nonzerox = np.array(nonzero[1])
 
-    print("Detecting lane pixels and fitting to find lane boundary.")
+    #print("Detecting lane pixels and fitting to find lane boundary.")
     histogram = np.sum(combined[combined.shape[0]/2:,:], axis=0)
     if DEBUG: plt.plot(histogram); plt.show()
     # Create an output image to draw on and  visualize the result
@@ -284,11 +287,13 @@ def pipeline(cal_vars, src_img, optimize=False):
     midpoint = np.int(histogram.shape[0]/2)
     leftx_base = np.argmax(histogram[:midpoint])
     rightx_base = np.argmax(histogram[midpoint:]) + midpoint
-    if not optimize:
+    if not OPTIMIZE:
         left_lane_inds, right_lane_inds = sliding_window_search(out_img, combined, leftx_base, rightx_base)
+        OPTIMIZE = True
     else:
-        left_lane_inds, right_lane_inds = optimized_search(out_img, binary_warped, left_fit, right_fit)
-                                                           
+        left_lane_inds, right_lane_inds = optimized_search(combined, LEFT_FIT, RIGHT_FIT)
+                          
+    if DEBUG: print("left_lane_inds, right_lane_inds = %s, %s" % (left_lane_inds, right_lane_inds))                             
     # Concatenate the arrays of indices
     left_lane_inds = np.concatenate(left_lane_inds)
     right_lane_inds = np.concatenate(right_lane_inds)
@@ -300,51 +305,52 @@ def pipeline(cal_vars, src_img, optimize=False):
     righty = nonzeroy[right_lane_inds] 
 
     # Fit a second order polynomial to each
-    left_fit = np.polyfit(lefty, leftx, 2)
-    right_fit = np.polyfit(righty, rightx, 2)
+    LEFT_FIT = np.polyfit(lefty, leftx, 2)
+    RIGHT_FIT = np.polyfit(righty, rightx, 2)
 
     # Generate x and y values for plotting
     fity = np.linspace(0, combined.shape[0]-1, combined.shape[0] )
-    fit_leftx = left_fit[0]*fity**2 + left_fit[1]*fity + left_fit[2]
-    fit_rightx = right_fit[0]*fity**2 + right_fit[1]*fity + right_fit[2]
+    fit_leftx = LEFT_FIT[0]*fity**2 + LEFT_FIT[1]*fity + LEFT_FIT[2]
+    fit_rightx = RIGHT_FIT[0]*fity**2 + RIGHT_FIT[1]*fity + RIGHT_FIT[2]
 
-    print("Warp the detected lane boundaries back onto the original image.")
-    result = visualize(out_img, warped_image, Minv,
+    if DEBUG: print("Warp the detected lane boundaries back onto the original image.")
+    result = visualize(original_image, warped_image, Minv,
                        fit_leftx, fit_rightx, fity, 
                        nonzerox, nonzeroy,
                        left_lane_inds, right_lane_inds)
 
-    print("Output visual display of the lane boundaries and numerical estimation ")
-    print("of lane curvature and vehicle position.")
-    plt.imshow(result); plt.show()
+    if DEBUG:
+        print("Output visual display of the lane boundaries and numerical estimation ")
+        print("of lane curvature and vehicle position.")
+        plt.imshow(result); plt.show()
+
     return result 
 
-def process_image():
-    # TODO: Implement a generator for video clips?
-    # Would allow for initial sliding window and then optimized version
-    pass
+    
 
 def main():
+    global CAL_VARS
 
     # So we don't have to calibrate every time
     try:
         with open('./cal_vars.p', 'rb') as _input:
-            cal_vars = pickle.load(_input)
+            CAL_VARS = pickle.load(_input)
         print('Successfully loaded prior calibration variables')
     except Exception as e:
         print('Got exception %s when trying to load calibration variables' % e)
         print('No saved calibration variables, calibrating now (saving for future use)')
-        cal_vars = calibration()
+        CAL_VARS = calibration()
         with open('./cal_vars.p', 'wb') as output:
-            pickle.dump(cal_vars, output)    
+            pickle.dump(CAL_VARS, output)    
         
  
     # TODO: For a series of test images (in the test_images folder in the repository): 
-    images = glob.glob('test_images/test*.jpg')
-    print("Looking at images %s" % images)
-    for idx, fname in enumerate(images):
-        image = cv2.imread(fname)
-        pipeline(cal_vars, image)
+    if DEBUG:
+        images = glob.glob('test_images/test*.jpg')
+        print("Looking at images %s" % images)
+        for idx, fname in enumerate(images):
+            image = cv2.imread(fname)
+            pipeline(image)
     # NOTE: save example images from each stage of your pipeline to the output_images folder 
     #       and provide a description of what each image is in your README for the project.
 
@@ -352,10 +358,15 @@ def main():
     # Run your algorithm on a video. In the case of the video, you must search for the lane lines in the first few frames, 
     # and, once you have a high-confidence detection, use that information to track the position and curvature of the lines 
     # from frame to frame. Save your output video and include it with the submission.
-    #white_output = 'white.mp4'
-    #clip1 = VideoFileClip("solidWhiteRight.mp4")
-    #white_clip = clip1.fl_image(process_image) #NOTE: this function expects color images!!
+    output_file = 'out.mp4'
+    clip = VideoFileClip('challenge_video.mp4')
+    out_clip = clip.fl_image(pipeline)
+    out_clip.write_videofile(output_file, audio=False)
 
+    output_file = 'out_harder.mp4'
+    clip = VideoFileClip('harder_challenge_video.mp4')
+    out_clip = clip.fl_image(pipeline)
+    out_clip.write_videofile(output_file, audio=False)
 
 if __name__ == "__main__":
     main()
