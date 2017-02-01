@@ -5,6 +5,7 @@ import pickle
 import matplotlib.pyplot as plt
 from moviepy.editor import VideoFileClip
 
+PROCESS_VIDEO = False
 TRY_CHALLENGE = False
 DEBUG = not True
 OPTIMIZE = False # Starting value
@@ -274,15 +275,14 @@ def pipeline(src_img):
     gradx = abs_sobel_thresh(gray_warped, orient='x', 
                              sobel_kernel=ksize, 
                              thresh_min=50, thresh_max=200)
-    #if DEBUG: print('abs_sobel_thresh x'); plt.imshow(gradx); plt.show()
-    #grady = np.zeros_like(gradx) \
+    if DEBUG: print('abs_sobel_thresh x'); plt.imshow(gradx); plt.show()
     grady = abs_sobel_thresh(gray_warped, orient='y', 
                              sobel_kernel=ksize, 
                              thresh_min=50, thresh_max=200)
-    #if DEBUG: print('abs_sobel_thresh y'); plt.imshow(grady); plt.show()
+    if DEBUG: print('abs_sobel_thresh y'); plt.imshow(grady); plt.show()
     mag_binary = mag_thresh(gray_warped, sobel_kernel=ksize, 
                             mag_thresh=(50, 250))
-    #if DEBUG: print('mag_thresh'); plt.imshow(mag_binary); plt.show()
+    if DEBUG: print('mag_thresh'); plt.imshow(mag_binary); plt.show()
     #dir_binary = dir_threshold(gray_warped, sobel_kernel=ksize, 
     #                           thresh=(np.pi/2-0.1, np.pi/2+0.1))
     #if DEBUG: print('dir_binary'); plt.imshow(dir_binary); plt.show()
@@ -290,8 +290,8 @@ def pipeline(src_img):
                               h_thresh=(0,50), v_thresh=(100,255), s_thresh=(100,255))
     hsv_binary_w = hsv_select(warped_image, 
                               h_thresh=(20,255), v_thresh=(180,255), s_thresh=(0,80))
-    #if DEBUG: print('hls_select_y'); plt.imshow(hsv_binary_y); plt.show()
-    #if DEBUG: print('hls_select_w'); plt.imshow(hsv_binary_w); plt.show()
+    if DEBUG: print('hls_select_y'); plt.imshow(hsv_binary_y); plt.show()
+    if DEBUG: print('hls_select_w'); plt.imshow(hsv_binary_w); plt.show()
     combined = np.zeros_like(gradx) 
     combined[((gradx == 1) | (grady == 1)) 
              | ((mag_binary == 1))  #| (dir_binary == 1)) 
@@ -358,6 +358,11 @@ def pipeline(src_img):
     # Calculate the new radius of curvature
     left_curverad = ((1 + (2*left_fit_cr[0]*y_eval*ym_per_pix + left_fit_cr[1])**2)**1.5) / np.absolute(2*left_fit_cr[0])
     right_curverad = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / np.absolute(2*right_fit_cr[0])
+    epsilon = 10 # The two lines have "fused"
+    if left_curverad < 100.0 or right_curverad < 100.0 or left_curverad - right_curverad < epsilon:
+        OPTIMIZE = False
+        # If the ROC of a lane line falls below a certain value, it is clearly invalid and we need to go
+        # back to the sliding window temporarily
     off_cen_l = abs(leftx_base-img_size[0]/4)*xm_per_pix
     off_cen_r = abs(rightx_base-img_size[0]*3/4)*xm_per_pix
     off_cen = (off_cen_l+off_cen_r)/2
@@ -401,13 +406,15 @@ def main():
         
  
     # TODO: For a series of test images (in the test_images folder in the repository): 
-    if DEBUG:
+    if not PROCESS_VIDEO:
         images = glob.glob('test_images/test*.jpg')
         print("Looking at images %s" % images)
         for idx, fname in enumerate(images):
             image = cv2.imread(fname)
-            pipeline(image)
-            cv2.imwrite('output_images/%s' % fname, image)
+            result = pipeline(image)
+            out_fn = './output_images/%s' % fname.split('/')[-1]
+            print('Saving output to %s' % out_fn)
+            cv2.imwrite(out_fn, result)
         # NOTE: save example images from each stage of your pipeline to the output_images folder 
         #       and provide a description of what each image is in your README for the project.
     else:

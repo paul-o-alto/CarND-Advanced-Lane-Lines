@@ -5,6 +5,7 @@ import time
 import os
 import matplotlib.pyplot as plt
 import matplotlib.image  as mpimg
+from scipy.ndimage.measurements import label
 from skimage.feature import hog
 from sklearn.svm import LinearSVC
 from sklearn.externals import joblib
@@ -13,6 +14,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cross_validation import train_test_split
 from moviepy.editor import VideoFileClip
 
+DEBUG = True
 MODEL_FILE= 'svm.pkl'
 
 def region_of_interest(img, vertices):
@@ -50,6 +52,37 @@ def draw_boxes(img, bboxes, color=(0, 0, 255), thick=6):
         cv2.rectangle(draw_img, bbox[0], bbox[1], color, thick)
     # Return the image copy with boxes drawn
     return draw_img
+
+def draw_labeled_bboxes(img, labels):
+    # Iterate through all detected cars
+    for car_number in range(1, labels[1]+1):
+        # Find pixels with each car_number label value
+        nonzero = (labels[0] == car_number).nonzero()
+        # Identify x and y values of those pixels
+        nonzeroy = np.array(nonzero[0])
+        nonzerox = np.array(nonzero[1])
+        # Define a bounding box based on min/max x and y
+        bbox = ((np.min(nonzerox), np.min(nonzeroy)), (np.max(nonzerox), np.max(nonzeroy)))
+        # Draw the box on the image
+        cv2.rectangle(img, bbox[0], bbox[1], (0,0,255), 6)
+    # Return the image
+    return img
+
+def add_heat(heatmap, bbox_list):
+    # Iterate through list of bboxes
+    for box in bbox_list:
+        # Add += 1 for all pixels inside each bbox
+        # Assuming each "box" takes the form ((x1, y1), (x2, y2))
+        heatmap[box[0][1]:box[1][1], box[0][0]:box[1][0]] += 1
+
+    # Return updated heatmap
+    return heatmap
+
+def apply_threshold(heatmap, threshold):
+    # Zero out pixels below the threshold
+    heatmap[heatmap <= threshold] = 0
+    # Return thresholded map
+    return heatmap
 
 # Define a function that takes an image,
 # start and stop positions in both x and y, 
@@ -315,14 +348,37 @@ def pipeline(img):
         print('Got exception %s when trying to load model file' % e)
 
     # This part is optional (helps in avoiding searching the sky, for example)
-    # img = region_of_interest(img, vertices)
+    img_size = img.shape[0:2]
+    img_size = img_size[::-1] # Reverse order
+    vertices = np.float32([[0, img_size[1]/2],
+                           [0, img_size[1]], 
+                           [img_size[0], img_size[1]],
+                           [img_size[0], img_size[1]/2]])
+    #img = region_of_interest(img, vertices)
 
     # Implement a sliding-window technique and use your trained classifier 
     # to search for vehicles in images.
-    window_list = slide_window(img, x_start_stop=[0, img.shape[0]], y_start_stop=[0, img.shape[1]])
+    window_list = slide_window(img, x_start_stop=[0, img_size[0]], y_start_stop=[img_size[1], img_size[1]/2])
     bboxes = window_list # is this true?
     # Run your pipeline on a video stream and create a heat map of recurring 
     # detections frame by frame to reject outliers and follow detected vehicles.
+
+    for window in window_list:
+        sub_img = gray[window[0][1]:window[1][1], window[0][0]:window[1][0]]
+        plt.imshow(sub_img)
+        plt.show()
+
+    heatmap = np.zeros_like(img[:,:,0]).astype(np.float)
+    heatmap = apply_threshold(heatmap, 2)
+    labels = label(heatmap)
+    if labels:
+        print(labels[1], 'cars found')
+    plt.imshow(labels[0], cmap='gray')
+
+    # Draw bounding boxes on a copy of the image
+    draw_img = draw_labeled_bboxes(np.copy(img), labels)
+    # Display the image
+    plt.imshow(draw_img)
 
     # Estimate a bounding box for vehicles detected.
     out_img = draw_boxes(img, bboxes, color=(0, 0, 255), thick=6)
@@ -343,13 +399,20 @@ def main():
     if not os.path.isfile(MODEL_FILE):
         model = train(cars, notcars)
         joblib.dump(model, MODEL_FILE) 
-    
+   
 
-    # For processing video
-    output_file = 'out.mp4'
-    clip = VideoFileClip('project_video.mp4')
-    out_clip = clip.fl_image(pipeline)
-    out_clip.write_videofile(output_file, audio=False)
+    if DEBUG:
+        images = glob.glob('test_images/test*.jpg')
+        print("Looking at images %s" % images)
+        for idx, fname in enumerate(images):
+            image = cv2.imread(fname)
+            pipeline(image) 
+    else:
+        # For processing video
+        output_file = 'out.mp4'
+        clip = VideoFileClip('project_video.mp4')
+        out_clip = clip.fl_image(pipeline)
+        out_clip.write_videofile(output_file, audio=False)
 
 if __name__ == '__main__':
     main()
