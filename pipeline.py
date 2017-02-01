@@ -5,16 +5,17 @@ import pickle
 import matplotlib.pyplot as plt
 from moviepy.editor import VideoFileClip
 
-DEBUG = False #True
+TRY_CHALLENGE = not False
+DEBUG = not True
 OPTIMIZE = False # Starting value
 LEFT_FIT, RIGHT_FIT = None, None # Current lines
 CAL_VARS = None
 
 # Define a function that takes an image, gradient orientation,
 # and threshold min / max values.
-def abs_sobel_thresh(img, sobel_kernel=3, orient='x', thresh_min=0, thresh_max=255):
+def abs_sobel_thresh(gray, sobel_kernel=3, orient='x', thresh_min=0, thresh_max=255):
     # Convert to grayscale
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    #gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     # Apply x or y gradient with the OpenCV Sobel() function
     # and take the absolute value
     if orient == 'x':
@@ -33,9 +34,9 @@ def abs_sobel_thresh(img, sobel_kernel=3, orient='x', thresh_min=0, thresh_max=2
 
 # Define a function to return the magnitude of the gradient
 # for a given sobel kernel size and threshold values
-def mag_thresh(img, sobel_kernel=3, mag_thresh=(0, 255)):
+def mag_thresh(gray, sobel_kernel=3, mag_thresh=(0, 255)):
     # Convert to grayscale
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    #gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     # Take both Sobel x and y gradients
     sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
     sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
@@ -52,9 +53,9 @@ def mag_thresh(img, sobel_kernel=3, mag_thresh=(0, 255)):
     return binary_output
 
 # Define a function to threshold an image for a given range and Sobel kernel
-def dir_threshold(img, sobel_kernel=3, thresh=(0, np.pi/2)):
+def dir_threshold(gray, sobel_kernel=3, thresh=(0, np.pi/2)):
     # Grayscale
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    #gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     # Calculate the x and y gradients
     sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
     sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
@@ -100,16 +101,21 @@ def calibration():
     return cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1],None,None)
  
 # Define a function that thresholds the S-channel of HLS
-def hls_select(img, thresh=(0, 255)):
-    hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS)
-    s_channel = hls[:,:,2]
+def hsv_select(img, h_thresh=(0, 180), v_thresh=(0,255), s_thresh=(0,255)):
+    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+    h_channel = hsv[:,:,0]
+    s_channel = hsv[:,:,1]
+    v_channel = hsv[:,:,2]
     binary_output = np.zeros_like(s_channel)
-    binary_output[(s_channel > thresh[0]) & (s_channel <= thresh[1])] = 1
+    binary_output[((h_channel > h_thresh[0]) & (h_channel <= h_thresh[1]))
+                & ((v_channel > v_thresh[0]) & (v_channel <= v_thresh[1])) 
+                & ((s_channel > s_thresh[0]) & (s_channel <= s_thresh[1]))
+                 ] = 1
     return binary_output
 
 
 # Set the width of the windows +/- margin
-MARGIN = 75 #100
+MARGIN = 75
 # Set minimum number of pixels found to recenter window
 MINPIX = 50
 
@@ -228,15 +234,25 @@ def pipeline(src_img):
     #plt.imshow(src_img); plt.show()
     #print("Applying the distortion correction to the raw image.")
     original_image = cv2.undistort(src_img, mtx, dist, None, mtx)
-    src = np.float32([[180,620],[1200,620],[840,450],[440,450]])
-    dst = np.float32([[0,720],[1280,720],[1280,0],[0,0]])
+    img_size = original_image.shape[0:2]
+    img_size = img_size[::-1] # Reverse order
+    
+    #src = np.float32([[180,620],[1200,620],[840,450],[440,450]])
+    src = np.float32([[(img_size[0]/2)-80,   img_size[1]/2+100],
+                      [(img_size[0]/6)+10,   img_size[1]],
+                      [(img_size[0]*5/6)-10, img_size[1]],
+                      [(img_size[0]/2)+80,   img_size[1]/2+100]])
+    #dst = np.float32([[0,720],[1280,720],[1280,0],[0,0]])
+    dst = np.float32([[(img_size[0]/4), 0],
+                      [(img_size[0]/4), img_size[1]],
+                      [(img_size[0]*3/4), img_size[1]],
+                      [(img_size[0]*3/4), 0]])
+
     # One especially smart way to do this would be to use 
     # four well-chosen corners that were automatically detected during the 
     # undistortion steps
     M = cv2.getPerspectiveTransform(src, dst)
     Minv = cv2.getPerspectiveTransform(dst, src)
-    img_size = original_image.shape[0:2]
-    img_size = img_size[::-1] # Reverse order
     warped_image = cv2.warpPerspective(original_image, M, img_size,
                                        flags=cv2.INTER_LINEAR)
     if DEBUG: print('warped_image'); plt.imshow(warped_image); plt.show()
@@ -244,30 +260,36 @@ def pipeline(src_img):
     #print("Using color transforms, gradients, etc.")
     #print("to create a thresholded binary image.")
     # Choose a Sobel kernel size
-    ksize = 3#11 
+    ksize = 11 
     # Choose an odd number >= 3 to smooth gradient measurements
+    gray_warped = cv2.cvtColor(warped_image, cv2.COLOR_BGR2GRAY)
 
     # Apply each of the thresholding functions
-    gradx = abs_sobel_thresh(warped_image, orient='x', 
+    gradx = abs_sobel_thresh(gray_warped, orient='x', 
                              sobel_kernel=ksize, 
-                             thresh_min=100, thresh_max=200)
+                             thresh_min=50, thresh_max=200)
     if DEBUG: print('abs_sobel_thresh x'); plt.imshow(gradx); plt.show()
-    grady = abs_sobel_thresh(warped_image, orient='y', 
+    #grady = np.zeros_like(gradx) \
+    grady = abs_sobel_thresh(gray_warped, orient='y', 
                              sobel_kernel=ksize, 
-                             thresh_min=100, thresh_max=200)
+                             thresh_min=50, thresh_max=200)
     if DEBUG: print('abs_sobel_thresh y'); plt.imshow(grady); plt.show()
-    mag_binary = mag_thresh(warped_image, sobel_kernel=ksize, 
-                            mag_thresh=(75, 200))
+    mag_binary = mag_thresh(gray_warped, sobel_kernel=ksize, 
+                            mag_thresh=(50, 250))
     if DEBUG: print('mag_thresh'); plt.imshow(mag_binary); plt.show()
-    dir_binary = dir_threshold(warped_image, sobel_kernel=ksize, 
-                               thresh=(0.1, np.pi/2))
-    if DEBUG: print('dir_binary'); plt.imshow(dir_binary); plt.show()
-    hls_binary = hls_select(warped_image, thresh=(100, 255))
-    if DEBUG: print('hls_select'); plt.imshow(hls_binary); plt.show()
+    #dir_binary = dir_threshold(gray_warped, sobel_kernel=ksize, 
+    #                           thresh=(np.pi/2-0.1, np.pi/2+0.1))
+    #if DEBUG: print('dir_binary'); plt.imshow(dir_binary); plt.show()
+    hsv_binary_y = hsv_select(warped_image, 
+                              h_thresh=(0,50), v_thresh=(100,255), s_thresh=(100,255))
+    hsv_binary_w = hsv_select(warped_image, 
+                              h_thresh=(20,255), v_thresh=(180,255), s_thresh=(0,80))
+    if DEBUG: print('hls_select_y'); plt.imshow(hsv_binary_y); plt.show()
+    if DEBUG: print('hls_select_w'); plt.imshow(hsv_binary_w); plt.show()
     combined = np.zeros_like(gradx) 
-    combined[((gradx == 1) & (grady == 1)) 
-             | ((mag_binary == 1) & (dir_binary == 1)) 
-             | (hls_binary == 1)
+    combined[((gradx == 1) | (grady == 1)) 
+             | ((mag_binary == 1))# & (dir_binary == 1)) 
+             | ((hsv_binary_y == 1) | (hsv_binary_w == 1)) # Yellow and White
             ] = 1
     if DEBUG: print('Combined warped binary img'); plt.imshow(combined); plt.show()
 
@@ -351,22 +373,30 @@ def main():
         for idx, fname in enumerate(images):
             image = cv2.imread(fname)
             pipeline(image)
-    # NOTE: save example images from each stage of your pipeline to the output_images folder 
-    #       and provide a description of what each image is in your README for the project.
+            cv2.imwrite('output_images/%s' % fname, image)
+        # NOTE: save example images from each stage of your pipeline to the output_images folder 
+        #       and provide a description of what each image is in your README for the project.
+    else:
 
+        # Run your algorithm on a video. In the case of the video, you must search for the lane lines in the first few frames, 
+        # and, once you have a high-confidence detection, use that information to track the position and curvature of the lines 
+        # from frame to frame. Save your output video and include it with the submission.
+  
+        if not TRY_CHALLENGE:
+            output_file = 'project_video_out.mp4'
+            clip = VideoFileClip('project_video.mp4')
+            out_clip = clip.fl_image(pipeline)
+            out_clip.write_videofile(output_file, audio=False)
+        else:
+            output_file = 'challenge_video_out.mp4'
+            clip = VideoFileClip('challenge_video.mp4')
+            out_clip = clip.fl_image(pipeline)
+            out_clip.write_videofile(output_file, audio=False)
 
-    # Run your algorithm on a video. In the case of the video, you must search for the lane lines in the first few frames, 
-    # and, once you have a high-confidence detection, use that information to track the position and curvature of the lines 
-    # from frame to frame. Save your output video and include it with the submission.
-    output_file = 'out.mp4'
-    clip = VideoFileClip('challenge_video.mp4')
-    out_clip = clip.fl_image(pipeline)
-    out_clip.write_videofile(output_file, audio=False)
-
-    output_file = 'out_harder.mp4'
-    clip = VideoFileClip('harder_challenge_video.mp4')
-    out_clip = clip.fl_image(pipeline)
-    out_clip.write_videofile(output_file, audio=False)
+            output_file = 'harder_challenge_video_out.mp4'
+            clip = VideoFileClip('harder_challenge_video.mp4')
+            out_clip = clip.fl_image(pipeline)
+            out_clip.write_videofile(output_file, audio=False)
 
 if __name__ == "__main__":
     main()
