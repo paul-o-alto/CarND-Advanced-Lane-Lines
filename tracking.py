@@ -226,7 +226,10 @@ def extract_features(imgs, cspace='RGB', spatial_size=(32, 32),
     # Iterate through the list of images
     for file in imgs:
         # Read in each one by one
-        image = mpimg.imread(file)
+        if len(imgs) > 1:
+            image = mpimg.imread(file)
+        else:
+            image = file
         # apply color conversion if other than 'RGB'
         hog_channel = 2 # 3rd channel (index)
         if cspace != 'RGB':
@@ -242,24 +245,30 @@ def extract_features(imgs, cspace='RGB', spatial_size=(32, 32),
                 feature_image = cv2.cvtColor(image, cv2.COLOR_RGB2YUV)
         else: 
             feature_image = np.copy(image)
-        
+       
+        #final_vector = np.array([]) 
         hog_features = get_hog_features(feature_image[:,:,hog_channel],
                                         vis=False, feature_vec=True)
-        to_concat = (hog_features,)
+        final_vector = hog_features
+        #to_concat = (hog_features,)
+        np.append(final_vector, hog_features)
         spatial_features = None
         hist_features = None          
         # Apply bin_spatial() to get spatial color features
         if spatial_size: 
             spatial_features = bin_spatial(feature_image, size=spatial_size)
-            to_concat += (spatial_features,)
+            #to_concat += (spatial_features,)
+            np.append(final_vector, spatial_features)
         # Apply color_hist() also with a color space option now
         if hist_bins and hist_range: 
             hist_features = color_hist(feature_image, 
                                        nbins=hist_bins, 
                                        bins_range=hist_range)
-            to_concat += (hist_features,)
-        # Append the new feature vector to the features list
-        features.append(np.concatenate(to_concat))
+            #to_concat += (hist_features,)
+            np.append(final_vector, hist_features)
+
+        features.append(final_vector) 
+
     # Return list of feature vectors
     return features
 
@@ -313,15 +322,9 @@ def train(cars, notcars):
     # vector. (these default to true in extract_features when parameters
     # are provided)
     print('# cars: %s, # not-cars: %s' % (len(cars), len(notcars)))
-    car_features    = extract_features(cars, cspace='HSV',
-                                       spatial_size=None, #(32, 32),
-                                       hist_bins=None, #32,
-                                       hist_range=None)#(0, 256))
+    car_features    = extract_features(cars, cspace='HSV')
     # NOTE: HSV, best choice?
-    notcar_features = extract_features(notcars, cspace='HSV', 
-                                       spatial_size=None, #(32, 32),
-                                       hist_bins=None, #32,
-                                       hist_range=None) #(0, 256)) 
+    notcar_features = extract_features(notcars, cspace='HSV') 
     print('Car features: %s, Not-cars features: %s'
           % (len(car_features), len(notcar_features)))
 
@@ -356,20 +359,37 @@ def pipeline(img):
                            [img_size[0], img_size[1]/2]])
     #img = region_of_interest(img, vertices)
 
-    # Implement a sliding-window technique and use your trained classifier 
-    # to search for vehicles in images.
-    window_list = slide_window(img, x_start_stop=[0, img_size[0]], y_start_stop=[img_size[1], img_size[1]/2])
-    bboxes = window_list # is this true?
-    # Run your pipeline on a video stream and create a heat map of recurring 
-    # detections frame by frame to reject outliers and follow detected vehicles.
+    if DEBUG: plt.imshow(img); plt.show()
+    # Implement a sliding-window technique
+    window_list = slide_window(img, x_start_stop=[0, img_size[0]], y_start_stop=[img_size[1]/2, img_size[1]]) # SMALL TO LARGE!
+    #print('window_list: %s' % window_list)
 
+    # ...and use the trained classifer to search for vehicles in subimages
+    bbox_list = []
     for window in window_list:
-        sub_img = gray[window[0][1]:window[1][1], window[0][0]:window[1][0]]
-        plt.imshow(sub_img)
-        plt.show()
+        sub_img = img[window[0][1]:window[1][1], window[0][0]:window[1][0]]
+        img_features = extract_features([sub_img], cspace='HSV')
+        #X = np.vstack((img_features,)).astype(np.float64)
+        # Fit a per-column scaler
+        X_scaler = StandardScaler().fit(img_features)
+        # Apply the scaler to X
+        scaled_X = X_scaler.transform(img_features)
+        prediction = model.predict(scaled_X)[0]
+        if prediction == 1:
+            print('Found car')
+            bbox_list.append(window)
+            if False: #DEBUG:
+                plt.imshow(sub_img)
+                plt.show()
 
     heatmap = np.zeros_like(img[:,:,0]).astype(np.float)
+    heatmap = add_heat(heatmap, bbox_list)
+    plt.imshow(heatmap); plt.show()
+    # Run your pipeline on a video stream and create a heat map of recurring 
+    # detections frame by frame to reject outliers and follow detected vehicles.
+    # NOTE: Does this belong outside?
     heatmap = apply_threshold(heatmap, 2)
+    plt.imshow(heatmap); plt.show()
     labels = label(heatmap)
     if labels:
         print(labels[1], 'cars found')
@@ -381,9 +401,9 @@ def pipeline(img):
     plt.imshow(draw_img)
 
     # Estimate a bounding box for vehicles detected.
-    out_img = draw_boxes(img, bboxes, color=(0, 0, 255), thick=6)
+    #out_img = draw_boxes(img, bboxes, color=(0, 0, 255), thick=6)
 
-    return out_img 
+    return draw_img #out_img 
 
 def main():
     # Divide up into cars and notcars
