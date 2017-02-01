@@ -5,7 +5,7 @@ import pickle
 import matplotlib.pyplot as plt
 from moviepy.editor import VideoFileClip
 
-TRY_CHALLENGE = not False
+TRY_CHALLENGE = False
 DEBUG = not True
 OPTIMIZE = False # Starting value
 LEFT_FIT, RIGHT_FIT = None, None # Current lines
@@ -115,14 +115,14 @@ def hsv_select(img, h_thresh=(0, 180), v_thresh=(0,255), s_thresh=(0,255)):
 
 
 # Set the width of the windows +/- margin
-MARGIN = 75
+MARGIN = 100
 # Set minimum number of pixels found to recenter window
 MINPIX = 50
 
 def visualize(original_img, warped_img, Minv, 
               fit_leftx, fit_rightx, fity, 
               nonzerox, nonzeroy, 
-              left_lane_inds, right_lane_inds):
+              left_lane_inds, right_lane_inds, text=None):
 
     # Create an image to draw on and an image to show the selection window
     window_img = np.zeros_like(original_img)
@@ -151,14 +151,23 @@ def visualize(original_img, warped_img, Minv,
 
     result = cv2.addWeighted(original_img, 1, window_img, 0.3, 0)
 
+    if text:
+        overlay = result.copy()
+        output  = result.copy()
+        #cv2.rectangle(overlay, (420, 205), (595, 385),
+        #              (0, 0, 255), -1)
+        cv2.putText(overlay, text,
+                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3)
+        cv2.addWeighted(overlay, 1, output, 0.5, 0, output)
+
     if DEBUG:
-        plt.imshow(result)
+        plt.imshow(output)
         plt.plot(fit_leftx, fity, color='yellow')
-        plt.plot(fit_rightx, fity, color='yellow')
+        plt.plot(fit_rightx, fity, color='white')
         plt.xlim(0, 1280)
         plt.ylim(720, 0)
 
-    return result
+    return output
 
 def sliding_window_search(out_img, binimg, leftx_base, rightx_base):
 
@@ -198,9 +207,9 @@ def sliding_window_search(out_img, binimg, leftx_base, rightx_base):
                           & (nonzeroy < win_y_high) 
                           & (nonzerox >= win_xright_low) 
                           & (nonzerox < win_xright_high)).nonzero()[0])
-        # Append these indices to the lists
-        left_lane_inds.append(good_left_inds)
-        right_lane_inds.append(good_right_inds)
+        # Append these indices to the lists (If list is non-empty)
+        if len(good_left_inds)  > 0:  left_lane_inds.append(good_left_inds)
+        if len(good_right_inds) > 0:  right_lane_inds.append(good_right_inds)
         # If you found > minpix pixels, recenter next window on their mean position
         if len(good_left_inds) > MINPIX:
             leftx_current = np.int(np.mean(nonzerox[good_left_inds]))
@@ -231,8 +240,7 @@ def pipeline(src_img):
     global OPTIMIZE, LEFT_FIT, RIGHT_FIT
     ret, mtx, dist, rvecs, tvecs = CAL_VARS
 
-    #plt.imshow(src_img); plt.show()
-    #print("Applying the distortion correction to the raw image.")
+    if DEBUG: plt.imshow(src_img); plt.show()
     original_image = cv2.undistort(src_img, mtx, dist, None, mtx)
     img_size = original_image.shape[0:2]
     img_size = img_size[::-1] # Reverse order
@@ -257,8 +265,6 @@ def pipeline(src_img):
                                        flags=cv2.INTER_LINEAR)
     if DEBUG: print('warped_image'); plt.imshow(warped_image); plt.show()
 
-    #print("Using color transforms, gradients, etc.")
-    #print("to create a thresholded binary image.")
     # Choose a Sobel kernel size
     ksize = 11 
     # Choose an odd number >= 3 to smooth gradient measurements
@@ -268,15 +274,15 @@ def pipeline(src_img):
     gradx = abs_sobel_thresh(gray_warped, orient='x', 
                              sobel_kernel=ksize, 
                              thresh_min=50, thresh_max=200)
-    if DEBUG: print('abs_sobel_thresh x'); plt.imshow(gradx); plt.show()
+    #if DEBUG: print('abs_sobel_thresh x'); plt.imshow(gradx); plt.show()
     #grady = np.zeros_like(gradx) \
     grady = abs_sobel_thresh(gray_warped, orient='y', 
                              sobel_kernel=ksize, 
                              thresh_min=50, thresh_max=200)
-    if DEBUG: print('abs_sobel_thresh y'); plt.imshow(grady); plt.show()
+    #if DEBUG: print('abs_sobel_thresh y'); plt.imshow(grady); plt.show()
     mag_binary = mag_thresh(gray_warped, sobel_kernel=ksize, 
                             mag_thresh=(50, 250))
-    if DEBUG: print('mag_thresh'); plt.imshow(mag_binary); plt.show()
+    #if DEBUG: print('mag_thresh'); plt.imshow(mag_binary); plt.show()
     #dir_binary = dir_threshold(gray_warped, sobel_kernel=ksize, 
     #                           thresh=(np.pi/2-0.1, np.pi/2+0.1))
     #if DEBUG: print('dir_binary'); plt.imshow(dir_binary); plt.show()
@@ -284,11 +290,11 @@ def pipeline(src_img):
                               h_thresh=(0,50), v_thresh=(100,255), s_thresh=(100,255))
     hsv_binary_w = hsv_select(warped_image, 
                               h_thresh=(20,255), v_thresh=(180,255), s_thresh=(0,80))
-    if DEBUG: print('hls_select_y'); plt.imshow(hsv_binary_y); plt.show()
-    if DEBUG: print('hls_select_w'); plt.imshow(hsv_binary_w); plt.show()
+    #if DEBUG: print('hls_select_y'); plt.imshow(hsv_binary_y); plt.show()
+    #if DEBUG: print('hls_select_w'); plt.imshow(hsv_binary_w); plt.show()
     combined = np.zeros_like(gradx) 
     combined[((gradx == 1) | (grady == 1)) 
-             | ((mag_binary == 1))# & (dir_binary == 1)) 
+             | ((mag_binary == 1))  #| (dir_binary == 1)) 
              | ((hsv_binary_y == 1) | (hsv_binary_w == 1)) # Yellow and White
             ] = 1
     if DEBUG: print('Combined warped binary img'); plt.imshow(combined); plt.show()
@@ -298,7 +304,6 @@ def pipeline(src_img):
     nonzeroy = np.array(nonzero[0])
     nonzerox = np.array(nonzero[1])
 
-    #print("Detecting lane pixels and fitting to find lane boundary.")
     histogram = np.sum(combined[combined.shape[0]/2:,:], axis=0)
     if DEBUG: plt.plot(histogram); plt.show()
     # Create an output image to draw on and  visualize the result
@@ -315,7 +320,7 @@ def pipeline(src_img):
     else:
         left_lane_inds, right_lane_inds = optimized_search(combined, LEFT_FIT, RIGHT_FIT)
                           
-    if DEBUG: print("left_lane_inds, right_lane_inds = %s, %s" % (left_lane_inds, right_lane_inds))                             
+                            
     # Concatenate the arrays of indices
     left_lane_inds = np.concatenate(left_lane_inds)
     right_lane_inds = np.concatenate(right_lane_inds)
@@ -335,11 +340,40 @@ def pipeline(src_img):
     fit_leftx = LEFT_FIT[0]*fity**2 + LEFT_FIT[1]*fity + LEFT_FIT[2]
     fit_rightx = RIGHT_FIT[0]*fity**2 + RIGHT_FIT[1]*fity + RIGHT_FIT[2]
 
+    # Compute radius of curvature
+    ploty = np.linspace(0, combined.shape[0]-1, combined.shape[0]) #num=720)# to cover same y-range as image
+    y_eval = np.max(ploty)
+    left_curverad  = ((1 + (2*LEFT_FIT[0]*y_eval + LEFT_FIT[1])**2)**1.5) / np.absolute(2*LEFT_FIT[0])
+    right_curverad = ((1 + (2*RIGHT_FIT[0]*y_eval + RIGHT_FIT[1])**2)**1.5) / np.absolute(2*RIGHT_FIT[0])
+    print(left_curverad, right_curverad)
+
+    # Define conversions in x and y from pixels space to meters
+    ym_per_pix = 30.0/720.0 # meters per pixel in y dimension
+    xm_per_pix = 3.7/700.0  # meters per pixel in x dimension
+    # Need decimal place so both vectors are of type float below!
+
+    # Fit new polynomials to x,y in world space
+    left_fit_cr  = np.polyfit(lefty*ym_per_pix,  leftx*xm_per_pix,  2)
+    right_fit_cr = np.polyfit(righty*ym_per_pix,  rightx*xm_per_pix, 2)
+    # Calculate the new radius of curvature
+    left_curverad = ((1 + (2*left_fit_cr[0]*y_eval*ym_per_pix + left_fit_cr[1])**2)**1.5) / np.absolute(2*left_fit_cr[0])
+    right_curverad = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / np.absolute(2*right_fit_cr[0])
+    off_cen_l = abs(leftx_base-img_size[0]/4)*xm_per_pix
+    off_cen_r = abs(rightx_base-img_size[0]*3/4)*xm_per_pix
+    off_cen = (off_cen_l+off_cen_r)/2
+    
+    # Now our radius of curvature is in meters
+    roc_text = ("L_ROC=%sm R_ROC=%sm off_cen=%sm" 
+               % (left_curverad, right_curverad, off_cen))
+    print(roc_text)
+    # Example values: 632.1 m 626.2 m 0.0
+
     if DEBUG: print("Warp the detected lane boundaries back onto the original image.")
     result = visualize(original_image, warped_image, Minv,
                        fit_leftx, fit_rightx, fity, 
                        nonzerox, nonzeroy,
-                       left_lane_inds, right_lane_inds)
+                       left_lane_inds, right_lane_inds,
+                       text=roc_text)
 
     if DEBUG:
         print("Output visual display of the lane boundaries and numerical estimation ")
