@@ -15,7 +15,8 @@ from sklearn.cross_validation import train_test_split
 from moviepy.editor import VideoFileClip
 
 DEBUG = True
-MODEL_FILE= 'svm.pkl'
+MODEL_FILE  = 'svm.pkl'
+SCALER_FILE = 'scaler.pkl' 
 
 def region_of_interest(img, vertices):
     """
@@ -169,22 +170,24 @@ def color_hist(img, nbins=32, bins_range=(0, 256)):
     # Concatenate the histograms into a single feature vector
     hist_features = np.concatenate((rhist[0], ghist[0], bhist[0]))
     # Return the individual histograms, bin_centers and feature vector
-    return rhist, ghist, bhist, bin_centers, hist_features
+    return hist_features, rhist, ghist, bhist, bin_centers
 
 # Define a function to compute color histogram features  
 # Pass the color_space flag as 3-letter all caps string
 # like 'HSV' or 'LUV' etc.
-def bin_spatial(img, color_space='RGB', size=(32, 32)):
+def bin_spatial(img, color_space='BGR', size=(32, 32)):
     # Convert image to new color space (if specified)
     if color_space != 'RGB':
-        if color_space == 'HSV':
-            feature_image = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+        if color_space == 'BGR':
+            feature_image = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        elif color_space == 'HSV':
+            feature_image = cv2.cvtColor(img, cv2.COLOR_HSV2RGB)
         elif color_space == 'LUV':
-            feature_image = cv2.cvtColor(img, cv2.COLOR_RGB2LUV)
+            feature_image = cv2.cvtColor(img, cv2.COLOR_LUV2RGB)
         elif color_space == 'HLS':
-            feature_image = cv2.cvtColor(img, cv2.COLOR_RGB2HLS)
+            feature_image = cv2.cvtColor(img, cv2.COLOR_HLS2RGB)
         elif color_space == 'YUV':
-            feature_image = cv2.cvtColor(img, cv2.COLOR_RGB2YUV)
+            feature_image = cv2.cvtColor(img, cv2.COLOR_YUV2RGB)
     else: feature_image = np.copy(img)             
     # Use cv2.resize().ravel() to create the feature vector
     features = cv2.resize(feature_image, size).ravel() 
@@ -207,7 +210,9 @@ def get_hog_features(img, vis=False, feature_vec=True):
                 cells_per_block=(CELL_PER_BLOCK, CELL_PER_BLOCK), 
                 #transform_sqrt=True, 
                 visualise=True) #, feature_vector=False)
-        return features, hog_image
+        plt.imshow(hog_image)
+        plt.show()
+        return features
     else:      
         features = hog(img, 
                        orientations=ORIENT, 
@@ -219,8 +224,8 @@ def get_hog_features(img, vis=False, feature_vec=True):
 
 # Define a function to extract features from a list of images
 # Have this function call bin_spatial() and color_hist()
-def extract_features(imgs, cspace='RGB', spatial_size=(32, 32),
-                     hist_bins=32, hist_range=(0, 256)):
+def extract_features(imgs, cspace='BGR', hog_plus=True,
+                     spatial_size=(32, 32), hist_bins=32, hist_range=(0, 256)):
     # Create a list to append feature vectors to
     features = []
     # Iterate through the list of images
@@ -230,44 +235,49 @@ def extract_features(imgs, cspace='RGB', spatial_size=(32, 32),
             image = mpimg.imread(file)
         else:
             image = file
+
+        
+        if image.shape[0] > 64:
+            #print(image.shape)
+            image = cv2.resize(image, (64, 64), 
+                               fx=64/image.shape[0], fy=64/image.shape[1])
+
         # apply color conversion if other than 'RGB'
-        hog_channel = 2 # 3rd channel (index)
-        if cspace != 'RGB':
-            if cspace == 'HSV':
-                feature_image = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+        hog_channel = 1 # 2nd channel (lightness) (from lectures)
+        if cspace != 'HLS':
+            if cspace == 'BGR':
+                feature_image = cv2.cvtColor(image, cv2.COLOR_BGR2HLS)
+            elif cspace == 'HSV':
+                feature_image = cv2.cvtColor(image, cv2.COLOR_HSV2HLS)
                 # NOTE: Might need to change default hog_channel here
             elif cspace == 'LUV':
-                feature_image = cv2.cvtColor(image, cv2.COLOR_RGB2LUV)
-            elif cspace == 'HLS':
+                feature_image = cv2.cvtColor(image, cv2.COLOR_LUV2HLS)
+            elif cspace == 'RGB':
                 feature_image = cv2.cvtColor(image, cv2.COLOR_RGB2HLS)
                 # NOTE: Might need to change default hog_channel here
             elif cspace == 'YUV':
-                feature_image = cv2.cvtColor(image, cv2.COLOR_RGB2YUV)
+                feature_image = cv2.cvtColor(image, cv2.COLOR_YUV2HLS)
         else: 
             feature_image = np.copy(image)
        
-        #final_vector = np.array([]) 
         hog_features = get_hog_features(feature_image[:,:,hog_channel],
                                         vis=False, feature_vec=True)
-        final_vector = hog_features
-        #to_concat = (hog_features,)
-        np.append(final_vector, hog_features)
+        #final_vector = hog_features
         spatial_features = None
-        hist_features = None          
-        # Apply bin_spatial() to get spatial color features
-        if spatial_size: 
-            spatial_features = bin_spatial(feature_image, size=spatial_size)
-            #to_concat += (spatial_features,)
-            np.append(final_vector, spatial_features)
-        # Apply color_hist() also with a color space option now
-        if hist_bins and hist_range: 
-            hist_features = color_hist(feature_image, 
+        hist_features = None
+        if hog_plus:
+            # Apply bin_spatial() to get spatial color features
+            if spatial_size: 
+                spatial_features = bin_spatial(feature_image, size=spatial_size)
+                #np.append(final_vector, spatial_features)
+            # Apply color_hist() also with a color space option now
+            if hist_bins and hist_range: 
+                hist_features = color_hist(feature_image, 
                                        nbins=hist_bins, 
                                        bins_range=hist_range)
-            #to_concat += (hist_features,)
-            np.append(final_vector, hist_features)
-
-        features.append(final_vector) 
+                hist_features = hist_features[0]
+        
+        features.append(np.concatenate((spatial_features, hist_features, hog_features)))
 
     # Return list of feature vectors
     return features
@@ -314,39 +324,31 @@ def train_svm(scaled_X, y):
 
     return svc
 
-def train(cars, notcars):
-    # Perform a Histogram of Oriented Gradients (HOG) feature extraction 
-    # on a labeled training set of images
-    # Optionally, you can also apply a color transform and append binned 
-    # color features, as well as histograms of color, to your HOG feature 
-    # vector. (these default to true in extract_features when parameters
-    # are provided)
+def get_training_specs(cars, notcars):
+    
     print('# cars: %s, # not-cars: %s' % (len(cars), len(notcars)))
-    car_features    = extract_features(cars, cspace='HSV')
-    # NOTE: HSV, best choice?
-    notcar_features = extract_features(notcars, cspace='HSV') 
+    car_features    = extract_features(cars)
+    notcar_features = extract_features(notcars)
     print('Car features: %s, Not-cars features: %s'
           % (len(car_features), len(notcar_features)))
+    #print(car_features.shape, notcar_features.shape)
 
     # Create an array stack of feature vectors
     X = np.vstack((car_features, notcar_features)).astype(np.float64)
+    #X = np.concatenate((car_features, notcar_features), axis=0).astype(np.float64)   
+ 
     # Fit a per-column scaler
     X_scaler = StandardScaler().fit(X)
-    # Apply the scaler to X
-    scaled_X = X_scaler.transform(X)
-
-    # Define the labels vector
     y = np.hstack((np.ones(len(car_features)), np.zeros(len(notcar_features))))
+    return X_scaler, X, y
 
-    # ...and train a classifier Linear SVM classifier
-    model = train_svm(scaled_X, y)
-    return model
 
 def pipeline(img):
 
     model = None
     try:
-        model = joblib.load(MODEL_FILE) 
+        model = joblib.load(MODEL_FILE)
+        scaler = joblib.load(SCALER_FILE) 
     except Exception as e:
         print('Got exception %s when trying to load model file' % e)
 
@@ -359,46 +361,49 @@ def pipeline(img):
                            [img_size[0], img_size[1]/2]])
     #img = region_of_interest(img, vertices)
 
-    if DEBUG: plt.imshow(img); plt.show()
+    #if DEBUG: plt.imshow(img); plt.show()
     # Implement a sliding-window technique
-    window_list = slide_window(img, x_start_stop=[0, img_size[0]], y_start_stop=[img_size[1]/2, img_size[1]]) # SMALL TO LARGE!
-    #print('window_list: %s' % window_list)
+   
+    bbox_list = [] 
+    # Try different window sizes
+    for size in [64]:
+        window_list = slide_window(img, 
+                               x_start_stop=[0, img_size[0]], 
+                               y_start_stop=[img_size[1]/2, img_size[1]],
+                               xy_window=(size,size)) # SMALL TO LARGE!
 
-    # ...and use the trained classifer to search for vehicles in subimages
-    bbox_list = []
-    for window in window_list:
-        sub_img = img[window[0][1]:window[1][1], window[0][0]:window[1][0]]
-        img_features = extract_features([sub_img], cspace='HSV')
-        #X = np.vstack((img_features,)).astype(np.float64)
-        # Fit a per-column scaler
-        X_scaler = StandardScaler().fit(img_features)
-        # Apply the scaler to X
-        scaled_X = X_scaler.transform(img_features)
-        prediction = model.predict(scaled_X)[0]
-        if prediction == 1:
-            print('Found car')
-            bbox_list.append(window)
-            if False: #DEBUG:
-                plt.imshow(sub_img)
-                plt.show()
+        # ...and use the trained classifer to search for vehicles in subimages
+        for window in window_list:
+            sub_img = img[window[0][1]:window[1][1], window[0][0]:window[1][0]]
+            img_features = extract_features([sub_img])
+            # Apply the scaler to X
+            scaled_X = scaler.transform(img_features)
+            prediction = model.predict(scaled_X)
+            print("Prediction: %s" % prediction)
+            if prediction == 1:
+                print('Found car!')
+                bbox_list.append(window)
+                if DEBUG:
+                    plt.imshow(sub_img)
+                    plt.show()
 
     heatmap = np.zeros_like(img[:,:,0]).astype(np.float)
     heatmap = add_heat(heatmap, bbox_list)
-    plt.imshow(heatmap); plt.show()
+    #plt.imshow(heatmap); plt.show()
     # Run your pipeline on a video stream and create a heat map of recurring 
     # detections frame by frame to reject outliers and follow detected vehicles.
     # NOTE: Does this belong outside?
     heatmap = apply_threshold(heatmap, 2)
-    plt.imshow(heatmap); plt.show()
+    #plt.imshow(heatmap); plt.show()
     labels = label(heatmap)
     if labels:
         print(labels[1], 'cars found')
-    plt.imshow(labels[0], cmap='gray')
+    #plt.imshow(labels[0], cmap='gray')
 
     # Draw bounding boxes on a copy of the image
     draw_img = draw_labeled_bboxes(np.copy(img), labels)
     # Display the image
-    plt.imshow(draw_img)
+    #plt.imshow(draw_img)
 
     # Estimate a bounding box for vehicles detected.
     #out_img = draw_boxes(img, bboxes, color=(0, 0, 255), thick=6)
@@ -406,6 +411,8 @@ def pipeline(img):
     return draw_img #out_img 
 
 def main():
+    global SCALER
+
     # Divide up into cars and notcars
     images = glob.glob('./training_set/*/*/*.jpeg')
     cars = []
@@ -416,10 +423,15 @@ def main():
         else:
             cars.append(image)
 
-    if not os.path.isfile(MODEL_FILE):
-        model = train(cars, notcars)
-        joblib.dump(model, MODEL_FILE) 
-   
+    if not os.path.isfile(MODEL_FILE) or not os.path.isfile(SCALER_FILE):
+        X_scaler, X, y = get_training_specs(cars, notcars)
+        # Apply the scaler to X
+        scaled_X = X_scaler.transform(X)
+        # ...and train a classifier Linear SVM classifier
+        model = train_svm(scaled_X, y)
+        joblib.dump(model, MODEL_FILE)
+        joblib.dump(X_scaler, SCALER_FILE)
+
 
     if DEBUG:
         images = glob.glob('test_images/test*.jpg')
