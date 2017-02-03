@@ -3,19 +3,16 @@ import numpy as np
 class Line():
 
     def __init__(self):
-        self.n = 60
+        self.n = 30
 
         # was the line detected in the last iteration?
         self.detected = False  
-        
-        # Were these suppose to be poly coefficients? not x's?
-        # x values of the last n fits of the line
-        #self.recent_xfitted = [] 
-        #average x values of the fitted line over the last n iterations
-        #self.bestx = None     
-
+        #xbase values of the last n fits of the line
+        self.recent_basis = [] 
+        #average xbase values of fitted line over last n iterations
+        self.best_xbase = None
+        #last n sets of line coefficients
         self.last_n_fits = []
-        
         #polynomial coefficients averaged over the last n iterations
         self.best_fit = None  
         #polynomial coefficients for the most recent fit
@@ -42,6 +39,15 @@ class Line():
 
         self.best_fit = np.mean(self.last_n_fits, axis=0)
  
+    def set_base_value(self, xbase):
+        self.recent_basis.append(xbase)
+
+        if len(self.recent_basis) > self.n:
+            self.recent_basis  = self.recent_basis[1:]
+
+        self.best_xbase  = \
+            int(np.mean(self.recent_basis , axis=0))
+
 
         
 

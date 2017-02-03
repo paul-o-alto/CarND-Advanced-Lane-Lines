@@ -7,7 +7,7 @@ from moviepy.editor import VideoFileClip
 from line import Line
 
 PROCESS_VIDEO = True
-TRY_CHALLENGE = False
+TRY_CHALLENGE = True
 DEBUG = not True
 OPTIMIZE = False # Starting value
 LEFT_FIT, RIGHT_FIT = Line(), Line() # Current lines
@@ -182,7 +182,7 @@ def visualize(original_img, warped_img, Minv,
 
     return output
 
-def sliding_window_search(out_img, binimg, leftx_base, rightx_base):
+def sliding_window_search(out_img, binimg):
 
     # Choose the number of sliding windows
     nwindows = 9
@@ -193,8 +193,9 @@ def sliding_window_search(out_img, binimg, leftx_base, rightx_base):
     nonzeroy = np.array(nonzero[0])
     nonzerox = np.array(nonzero[1])
     # Current positions to be updated for each window
-    leftx_current = leftx_base
-    rightx_current = rightx_base
+    leftx_current  = LEFT_FIT.best_xbase
+    rightx_current = RIGHT_FIT.best_xbase
+    print(leftx_current, rightx_current)
     # Create empty lists to receive left and right lane pixel indices
     left_lane_inds = []
     right_lane_inds = []
@@ -337,12 +338,11 @@ def pipeline(src_img):
     midpoint = np.int(histogram.shape[0]/2)
     leftx_base = np.argmax(histogram[:midpoint])
     rightx_base = np.argmax(histogram[midpoint:]) + midpoint
-    #LEFT_FIT.recent_xfitted.append(leftx_base)
-    #RIGHT_FIT.recent_xfitted.append(rightx_base)
+    LEFT_FIT.set_base_value(leftx_base)
+    RIGHT_FIT.set_base_value(rightx_base)
     if not LEFT_FIT.detected or not RIGHT_FIT.detected:
         left_lane_inds, right_lane_inds = \
-            sliding_window_search(out_img, combined, 
-                                  leftx_base, rightx_base)
+            sliding_window_search(out_img, combined)
         LEFT_FIT.detected  = True
         RIGHT_FIT.detected = True
     else:
