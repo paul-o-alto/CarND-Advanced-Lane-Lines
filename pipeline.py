@@ -4,31 +4,37 @@ import cv2
 import pickle
 import matplotlib.pyplot as plt
 from moviepy.editor import VideoFileClip
+from line import Line
 
-PROCESS_VIDEO = False
+PROCESS_VIDEO = True
 TRY_CHALLENGE = False
 DEBUG = not True
 OPTIMIZE = False # Starting value
-LEFT_FIT, RIGHT_FIT = None, None # Current lines
+LEFT_FIT, RIGHT_FIT = Line(), Line() # Current lines
 CAL_VARS = None
 
 # Define a function that takes an image, gradient orientation,
 # and threshold min / max values.
-def abs_sobel_thresh(gray, sobel_kernel=3, orient='x', thresh_min=0, thresh_max=255):
+def abs_sobel_thresh(gray, sobel_kernel=3, orient='x', 
+                     thresh_min=0, thresh_max=255):
     # Convert to grayscale
     #gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     # Apply x or y gradient with the OpenCV Sobel() function
     # and take the absolute value
     if orient == 'x':
-        abs_sobel = np.absolute(cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=sobel_kernel))
+        abs_sobel = np.absolute(cv2.Sobel(gray, cv2.CV_64F, 1, 0, 
+                                          ksize=sobel_kernel))
     if orient == 'y':
-        abs_sobel = np.absolute(cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=sobel_kernel))
+        abs_sobel = np.absolute(cv2.Sobel(gray, cv2.CV_64F, 0, 1, 
+                                          ksize=sobel_kernel))
     # Rescale back to 8 bit integer
     scaled_sobel = np.uint8(255*abs_sobel/np.max(abs_sobel))
     # Create a copy and apply the threshold
     binary_output = np.zeros_like(scaled_sobel)
-    # Here I'm using inclusive (>=, <=) thresholds, but exclusive is ok too
-    binary_output[(scaled_sobel >= thresh_min) & (scaled_sobel <= thresh_max)] = 1
+    # Here I'm using inclusive (>=, <=) thresholds, 
+    # but exclusive is ok too
+    binary_output[(scaled_sobel >= thresh_min) 
+                & (scaled_sobel <= thresh_max)] = 1
 
     # Return the result
     return binary_output
@@ -46,14 +52,15 @@ def mag_thresh(gray, sobel_kernel=3, mag_thresh=(0, 255)):
     # Rescale to 8 bit
     scale_factor = np.max(gradmag)/255 
     gradmag = (gradmag/scale_factor).astype(np.uint8) 
-    # Create a binary image of ones where threshold is met, zeros otherwise
+    # Create a binary image of ones where threshold is met, 
+    # zeros otherwise
     binary_output = np.zeros_like(gradmag)
-    binary_output[(gradmag >= mag_thresh[0]) & (gradmag <= mag_thresh[1])] = 1
+    binary_output[(gradmag >= mag_thresh[0]) 
+                & (gradmag <= mag_thresh[1])] = 1
 
     # Return the binary image
     return binary_output
 
-# Define a function to threshold an image for a given range and Sobel kernel
 def dir_threshold(gray, sobel_kernel=3, thresh=(0, np.pi/2)):
     # Grayscale
     #gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -64,20 +71,23 @@ def dir_threshold(gray, sobel_kernel=3, thresh=(0, np.pi/2)):
     # apply a threshold, and create a binary image result
     absgraddir = np.arctan2(np.absolute(sobely), np.absolute(sobelx))
     binary_output =  np.zeros_like(absgraddir)
-    binary_output[(absgraddir >= thresh[0]) & (absgraddir <= thresh[1])] = 1
+    binary_output[(absgraddir >= thresh[0]) 
+                & (absgraddir <= thresh[1])] = 1
 
     # Return the binary image
     return binary_output
 
 def calibration():
 
-    # First, compute the camera calibration matrix and distortion coefficients given a set of chessboard images 
+    # First, compute the camera calibration matrix 
+    # and distortion coefficients given a set of chessboard images 
     # (in the camera_cal folder in the repository).
-    # prepare object points, like (0,0,0), (1,0,0), (2,0,0) ....,(6,5,0)
+    # prepare object points, 
+    # like (0,0,0), (1,0,0), (2,0,0), ....,(6,5,0)
     objp = np.zeros((6*8,3), np.float32)
     objp[:,:2] = np.mgrid[0:8, 0:6].T.reshape(-1,2)
 
-    # Arrays to store object points and image points from all the images.
+    # Arrays to store object points and img points from all the images.
     objpoints = [] # 3d points in real world space
     imgpoints = [] # 2d points in image plane.
 
@@ -99,10 +109,12 @@ def calibration():
             imgpoints.append(corners)
 
     cv2.destroyAllWindows()
-    return cv2.calibrateCamera(objpoints, imgpoints, gray.shape[::-1],None,None)
+    return cv2.calibrateCamera(objpoints, imgpoints, 
+                               gray.shape[::-1],None,None)
  
 # Define a function that thresholds the S-channel of HLS
-def hsv_select(img, h_thresh=(0, 180), v_thresh=(0,255), s_thresh=(0,255)):
+def hsv_select(img, 
+               h_thresh=(0, 180), v_thresh=(0,255), s_thresh=(0,255)):
     hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
     h_channel = hsv[:,:,0]
     s_channel = hsv[:,:,1]
@@ -219,7 +231,7 @@ def sliding_window_search(out_img, binimg, leftx_base, rightx_base):
 
     return left_lane_inds, right_lane_inds
 
-def optimized_search(binary_warped, left_fit, right_fit):
+def optimized_search(binary_warped):
 
     # Assume you now have a new warped binary image 
     # from the next frame of video (also called "binary_warped")
@@ -228,11 +240,22 @@ def optimized_search(binary_warped, left_fit, right_fit):
     nonzeroy = np.array(nonzero[0])
     nonzerox = np.array(nonzero[1])
 
-    # Return these as 1-item lists, for consistency with the return value of the sliding window function
-    left_lane_inds  = [(((nonzerox > (left_fit[0]*(nonzeroy**2) + left_fit[1]*nonzeroy + left_fit[2] - MARGIN)) 
-                      & (nonzerox < (left_fit[0]*(nonzeroy**2) + left_fit[1]*nonzeroy + left_fit[2] + MARGIN))).nonzero()[0])]
-    right_lane_inds = [(((nonzerox > (right_fit[0]*(nonzeroy**2) + right_fit[1]*nonzeroy + right_fit[2] - MARGIN)) 
-                      & (nonzerox < (right_fit[0]*(nonzeroy**2) + right_fit[1]*nonzeroy + right_fit[2] + MARGIN))).nonzero()[0])]
+    # Return these as 1-item lists
+    # (for consistency with the ret value of sliding window function)
+    left_lane_inds  = \
+        [(((nonzerox > (LEFT_FIT.best_fit[0]*(nonzeroy**2) 
+                      + LEFT_FIT.best_fit[1]*nonzeroy 
+                      + LEFT_FIT.best_fit[2] - MARGIN)) 
+        & (nonzerox < (LEFT_FIT.best_fit[0]*(nonzeroy**2) 
+                     + LEFT_FIT.best_fit[1]*nonzeroy 
+                     + LEFT_FIT.best_fit[2] + MARGIN))).nonzero()[0])]
+    right_lane_inds = \
+        [(((nonzerox > (RIGHT_FIT.best_fit[0]*(nonzeroy**2) 
+                      + RIGHT_FIT.best_fit[1]*nonzeroy 
+                      + RIGHT_FIT.best_fit[2] - MARGIN)) 
+        & (nonzerox < (RIGHT_FIT.best_fit[0]*(nonzeroy**2) 
+                     + RIGHT_FIT.best_fit[1]*nonzeroy 
+                     + RIGHT_FIT.best_fit[2] + MARGIN))).nonzero()[0])]
 
     return left_lane_inds, right_lane_inds
 
@@ -314,12 +337,16 @@ def pipeline(src_img):
     midpoint = np.int(histogram.shape[0]/2)
     leftx_base = np.argmax(histogram[:midpoint])
     rightx_base = np.argmax(histogram[midpoint:]) + midpoint
-    if not OPTIMIZE:
-        left_lane_inds, right_lane_inds = sliding_window_search(out_img, combined, leftx_base, rightx_base)
-        OPTIMIZE = True
+    #LEFT_FIT.recent_xfitted.append(leftx_base)
+    #RIGHT_FIT.recent_xfitted.append(rightx_base)
+    if not LEFT_FIT.detected or not RIGHT_FIT.detected:
+        left_lane_inds, right_lane_inds = \
+            sliding_window_search(out_img, combined, 
+                                  leftx_base, rightx_base)
+        LEFT_FIT.detected  = True
+        RIGHT_FIT.detected = True
     else:
-        left_lane_inds, right_lane_inds = optimized_search(combined, LEFT_FIT, RIGHT_FIT)
-                          
+        left_lane_inds, right_lane_inds = optimized_search(combined)                          
                             
     # Concatenate the arrays of indices
     left_lane_inds = np.concatenate(left_lane_inds)
@@ -327,25 +354,46 @@ def pipeline(src_img):
 
     # Extract left and right line pixel positions
     leftx = nonzerox[left_lane_inds]
-    lefty = nonzeroy[left_lane_inds] 
+    lefty = nonzeroy[left_lane_inds]
+    LEFT_FIT.allx = leftx
+    LEFT_FIT.ally = lefty
     rightx = nonzerox[right_lane_inds]
-    righty = nonzeroy[right_lane_inds] 
+    righty = nonzeroy[right_lane_inds]
+    RIGHT_FIT.allx = rightx
+    RIGHT_FIT.ally = righty
 
+    new_left_fit = np.polyfit(lefty,  leftx,  2)
+    new_right_fit = np.polyfit(righty, rightx, 2)
+    LEFT_FIT.diffs  = abs(LEFT_FIT.current_fit - new_left_fit)
+    RIGHT_FIT.diffs = abs(RIGHT_FIT.current_fit - new_right_fit)
     # Fit a second order polynomial to each
-    LEFT_FIT = np.polyfit(lefty, leftx, 2)
-    RIGHT_FIT = np.polyfit(righty, rightx, 2)
+
+    LEFT_FIT.set_current_fit(new_left_fit)
+    RIGHT_FIT.set_current_fit(new_right_fit)
 
     # Generate x and y values for plotting
+    # We use the averaged coefficients based on a last n frames
     fity = np.linspace(0, combined.shape[0]-1, combined.shape[0] )
-    fit_leftx = LEFT_FIT[0]*fity**2 + LEFT_FIT[1]*fity + LEFT_FIT[2]
-    fit_rightx = RIGHT_FIT[0]*fity**2 + RIGHT_FIT[1]*fity + RIGHT_FIT[2]
+    fit_leftx = (LEFT_FIT.best_fit[0]*fity**2 
+               + LEFT_FIT.best_fit[1]*fity + LEFT_FIT.best_fit[2])
+    fit_rightx = (RIGHT_FIT.best_fit[0]*fity**2 
+               + RIGHT_FIT.best_fit[1]*fity + RIGHT_FIT.best_fit[2])
 
     # Compute radius of curvature
-    ploty = np.linspace(0, combined.shape[0]-1, combined.shape[0]) #num=720)# to cover same y-range as image
+    ploty = np.linspace(0, combined.shape[0]-1, combined.shape[0]) 
+    # to cover same y-range as image
     y_eval = np.max(ploty)
-    left_curverad  = ((1 + (2*LEFT_FIT[0]*y_eval + LEFT_FIT[1])**2)**1.5) / np.absolute(2*LEFT_FIT[0])
-    right_curverad = ((1 + (2*RIGHT_FIT[0]*y_eval + RIGHT_FIT[1])**2)**1.5) / np.absolute(2*RIGHT_FIT[0])
-    print(left_curverad, right_curverad)
+    left_curve_radius  = \
+        ((1 + (2*LEFT_FIT.best_fit[0]*y_eval 
+               + LEFT_FIT.best_fit[1])**2)**1.5) \
+        / np.absolute(2*LEFT_FIT.best_fit[0])
+    right_curve_radius = \
+        ((1 + (2*RIGHT_FIT.best_fit[0]*y_eval 
+               + RIGHT_FIT.best_fit[1])**2)**1.5) \
+        / np.absolute(2*RIGHT_FIT.best_fit[0])
+    print(left_curve_radius, right_curve_radius)
+    LEFT_FIT.radius_of_curvature_pix  = left_curve_radius
+    RIGHT_FIT.radius_of_curvature_pix = right_curve_radius
 
     # Define conversions in x and y from pixels space to meters
     ym_per_pix = 30.0/720.0 # meters per pixel in y dimension
@@ -354,22 +402,35 @@ def pipeline(src_img):
 
     # Fit new polynomials to x,y in world space
     left_fit_cr  = np.polyfit(lefty*ym_per_pix,  leftx*xm_per_pix,  2)
-    right_fit_cr = np.polyfit(righty*ym_per_pix,  rightx*xm_per_pix, 2)
+    right_fit_cr = np.polyfit(righty*ym_per_pix, rightx*xm_per_pix, 2)
     # Calculate the new radius of curvature
-    left_curverad = ((1 + (2*left_fit_cr[0]*y_eval*ym_per_pix + left_fit_cr[1])**2)**1.5) / np.absolute(2*left_fit_cr[0])
-    right_curverad = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / np.absolute(2*right_fit_cr[0])
+    lcurve_radius = ((1 + (2*left_fit_cr[0]*y_eval*ym_per_pix 
+                           + left_fit_cr[1])**2)**1.5) \
+                    / np.absolute(2*left_fit_cr[0])
+    rcurve_radius = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix 
+                           + right_fit_cr[1])**2)**1.5) \
+                    / np.absolute(2*right_fit_cr[0])
+    LEFT_FIT.radius_of_curvature_metric  = lcurve_radius
+    RIGHT_FIT.radius_of_curvature_metric = rcurve_radius
     epsilon = 10 # The two lines have "fused"
-    if left_curverad < 100.0 or right_curverad < 100.0 or left_curverad - right_curverad < epsilon:
-        OPTIMIZE = False
-        # If the ROC of a lane line falls below a certain value, it is clearly invalid and we need to go
+    if (lcurve_radius < 100.0 or rcurve_radius < 100.0 
+        or lcurve_radius - rcurve_radius < epsilon):
+        LEFT_FIT.detected  = False
+        RIGHT_FIT.detected = False
+        # If the ROC of a lane line falls below a certain value 
+        # it is clearly invalid and we need to go
         # back to the sliding window temporarily
-    off_cen_l = abs(leftx_base-img_size[0]/4)*xm_per_pix
-    off_cen_r = abs(rightx_base-img_size[0]*3/4)*xm_per_pix
-    off_cen = (off_cen_l+off_cen_r)/2
-    
+    LEFT_FIT.line_base_pos  = \
+        abs(leftx_base-img_size[0]/4)*xm_per_pix
+    RIGHT_FIT.line_base_pos = \
+        abs(rightx_base-img_size[0]*3/4)*xm_per_pix
+    off_cen = (LEFT_FIT.line_base_pos
+            + RIGHT_FIT.line_base_pos)/2
+        
+
     # Now our radius of curvature is in meters
     roc_text = ("L_ROC=%sm R_ROC=%sm off_cen=%sm" 
-               % (left_curverad, right_curverad, off_cen))
+               % (lcurve_radius, rcurve_radius, off_cen))
     print(roc_text)
     # Example values: 632.1 m 626.2 m 0.0
 
