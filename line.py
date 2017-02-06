@@ -18,9 +18,9 @@ class Line():
         #polynomial coefficients for the most recent fit
         self.current_fit = [np.array([False])]  
         #radius of curvature of the line in pixel space
-        self.radius_of_curvature_pix = None 
+        self.roc_pix = None 
         #radius of curvature of the line in metric space
-        self.radius_of_curvature_metric = None
+        self.roc_metric = None
         #distance in meters of vehicle center from the line
         self.line_base_pos = None 
         #difference in fit coefficients between last and new fits
@@ -39,6 +39,9 @@ class Line():
 
         self.best_fit = np.mean(self.last_n_fits, axis=0)
  
+    def get_current_xbase(self):
+        return self.recent_basis[-1]
+
     def set_base_value(self, xbase):
         self.recent_basis.append(xbase)
 
