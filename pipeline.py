@@ -331,14 +331,20 @@ def pipeline(src_img):
     gray_warped = cv2.cvtColor(warped_image, cv2.COLOR_BGR2GRAY)
 
     # Apply each of the thresholding functions
+    # For abs_sobel_thresh, suggested param values:
+    #    min=5, max=100
     gradx = abs_sobel_thresh(gray_warped, orient='x', 
                              sobel_kernel=ksize, 
                              thresh_min=50, thresh_max=200)
     grady = abs_sobel_thresh(gray_warped, orient='y', 
                              sobel_kernel=ksize, 
                              thresh_min=50, thresh_max=200)
+    # Suggested param values:
+    #    kernel=3, min=30, max=100
     mag_binary = mag_thresh(gray_warped, sobel_kernel=ksize, 
                             mag_thresh=(50, 250))
+    # Suggested param values:
+    #    kernel=15, thresh=(0.7, 1.3)
     #dir_binary = dir_threshold(gray_warped, sobel_kernel=ksize, 
     #                           thresh=(np.pi/2-0.1, np.pi/2+0.1))
     hsv_binary_y = hsv_select(warped_image, 
@@ -350,6 +356,9 @@ def pipeline(src_img):
              | ((mag_binary == 1))  #| (dir_binary == 1)) 
              | ((hsv_binary_y == 1) | (hsv_binary_w == 1)) # Yellow and White
             ] = 1
+    #combined = np.zeros_like(dir_binary)
+    #combined[((gradx == 1) & (grady == 1)) 
+    #       | ((mag_binary == 1) & (dir_binary == 1))] = 1
     if DEBUG: 
         cv2.imwrite('./output_images/binary_combo_example.jpg',
                     combined)
