@@ -106,9 +106,17 @@ def calibration():
                                gray.shape[::-1],None,None)
  
 # Define a function that thresholds the S-channel of HLS
+def hls_select(img, thresh=(0, 255)):
+    hls = cv2.cvtColor(img, cv2.COLOR_BGR2HLS) # BGR! NOT RGB!
+    s_channel = hls[:,:,2]
+    binary_output = np.zeros_like(s_channel)
+    binary_output[(s_channel > thresh[0]) & (s_channel <= thresh[1])] = 1
+    return binary_output
+
+# Define a function that thresholds the S-channel of HLS
 def hsv_select(img, 
                h_thresh=(0, 180), v_thresh=(0,255), s_thresh=(0,255)):
-    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV) # BGR! NOT RGB!
     h_channel = hsv[:,:,0]
     s_channel = hsv[:,:,1]
     v_channel = hsv[:,:,2]
@@ -344,17 +352,20 @@ def pipeline(src_img):
     mag_binary = mag_thresh(gray_warped, sobel_kernel=ksize, 
                             mag_thresh=(50, 250))
     # Suggested param values:
-    #    kernel=15, thresh=(0.7, 1.3)
-    #dir_binary = dir_threshold(gray_warped, sobel_kernel=ksize, 
-    #                           thresh=(np.pi/2-0.1, np.pi/2+0.1))
-    hsv_binary_y = hsv_select(warped_image, 
-                              h_thresh=(0,50), v_thresh=(100,255), s_thresh=(100,255))
-    hsv_binary_w = hsv_select(warped_image, 
-                              h_thresh=(20,255), v_thresh=(180,255), s_thresh=(0,80))
+    #    kernel=15, thresh=(0.7, 1.3) # Was note used before
+    dir_binary = dir_threshold(gray_warped, sobel_kernel=15, 
+                               thresh=(0.7, 1.3))
+    
+    hls_binary = hls_select(warped_image, thresh=(0,255))
+    # WHY DID I DO these two calls below!?
+    #hsv_binary_y = hsv_select(warped_image, 
+    #                          h_thresh=(0,50), v_thresh=(100,255), s_thresh=(100,255))
+    #hsv_binary_w = hsv_select(warped_image, 
+    #                          h_thresh=(20,255), v_thresh=(180,255), s_thresh=(0,80))
     combined = np.zeros_like(gradx) 
     combined[((gradx == 1) | (grady == 1)) 
-             | ((mag_binary == 1))  #| (dir_binary == 1)) 
-             | ((hsv_binary_y == 1) | (hsv_binary_w == 1)) # Yellow and White
+             | ((mag_binary == 1)  | (dir_binary == 1))
+             #| (hls_binary == 1 ) #((hsv_binary_y == 1) | (hsv_binary_w == 1)) # Yellow and White
             ] = 1
     #combined = np.zeros_like(dir_binary)
     #combined[((gradx == 1) & (grady == 1)) 
