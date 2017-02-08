@@ -133,37 +133,48 @@ MARGIN = 100
 # Set minimum number of pixels found to recenter window
 MINPIX = 50
 
-def visualize(original_img, warped_img, Minv,  
+def visualize(original_img, binary_warped, Minv,  
               nonzerox, nonzeroy, 
               text=None):
 
     # Create an image to draw on and an image to show the selection window
-    window_img = np.zeros_like(original_img)
+    #out_img = np.dstack((binary_warped, binary_warped, binary_warped))*255
+    warp_zero = np.zeros_like(binary_warped) #binary_warped = original_img, warp_zerp = window_img
+    color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
     # Color in left and right line pixels
     window_img[nonzeroy[LEFT_FIT.lane_inds] , nonzerox[LEFT_FIT.lane_inds]]  = [255, 0, 0]
     window_img[nonzeroy[RIGHT_FIT.lane_inds], nonzerox[RIGHT_FIT.lane_inds]] = [0, 0, 255]
 
     # Generate a polygon to illustrate the search window area
     # And recast the x and y points into usable format for cv2.fillPoly()
-    print(len(LEFT_FIT.best_fit), len(LEFT_FIT.ally))
-    left_line_window1 = np.array([np.transpose(np.vstack([LEFT_FIT.allx-MARGIN, LEFT_FIT.ally]))])
-    left_line_window2 = np.array([np.flipud(np.transpose(np.vstack([LEFT_FIT.allx+MARGIN, LEFT_FIT.ally])))])
-    left_line_pts = np.hstack((left_line_window1, left_line_window2))
-    right_line_window1 = np.array([np.transpose(np.vstack([RIGHT_FIT.allx-MARGIN, RIGHT_FIT.ally]))])
-    right_line_window2 = np.array([np.flipud(np.transpose(np.vstack([RIGHT_FIT.allx+MARGIN, RIGHT_FIT.ally])))])
-    right_line_pts = np.hstack((right_line_window1, right_line_window2))
+    #print(len(LEFT_FIT.best_fit), len(LEFT_FIT.ally))
+    #left_line_window1 = np.array([np.transpose(np.vstack([LEFT_FIT.allx-MARGIN, LEFT_FIT.ally]))])
+    #left_line_window2 = np.array([np.flipud(np.transpose(np.vstack([LEFT_FIT.allx+MARGIN, LEFT_FIT.ally])))])
+    #left_line_pts = np.hstack((left_line_window1, left_line_window2))
+    #right_line_window1 = np.array([np.transpose(np.vstack([RIGHT_FIT.allx-MARGIN, RIGHT_FIT.ally]))])
+    #right_line_window2 = np.array([np.flipud(np.transpose(np.vstack([RIGHT_FIT.allx+MARGIN, RIGHT_FIT.ally])))])
+    #right_line_pts = np.hstack((right_line_window1, right_line_window2))
+    # Recast the x and y points into usable format for cv2.fillPoly()
+    pts_left = np.array([np.transpose(np.vstack([LEFT_FIT.allx, LEFT_FIT.ally]))])
+    pts_right = np.array([np.flipud(np.transpose(np.vstack([RIGHT_FIT.allx, RIGHT_FIT.ally])))])
+    pts = np.hstack((pts_left, pts_right))
 
     # Draw the lane onto the warped blank image
-    cv2.fillPoly(window_img, np.int_([left_line_pts]), (0,255, 0))
-    cv2.fillPoly(window_img, np.int_([right_line_pts]), (0,255, 0))
+    #cv2.fillPoly(window_img, np.int_([left_line_pts]), (0,255, 0))
+    #cv2.fillPoly(window_img, np.int_([right_line_pts]), (0,255, 0))
+    cv2.fillPoly(color_warp, np.int_([pts]), (0,255, 0))
     #result = cv2.addWeighted(warped_img, 1, window_img, 0.3, 0)
 
     img_size = window_img.shape[0:2]
     img_size = img_size[::-1] # Reverse order
-    window_img = cv2.warpPerspective(window_img, Minv, img_size,
-                                     flags=cv2.INTER_LINEAR)
+    # Warp the blank back to original image space using inverse perspective matrix (Minv)
+    newwarp = cv2.warpPerspective(color_warp, #window_img, 
+                                  Minv, img_size,
+                                  flags=cv2.INTER_LINEAR)
 
-    result = cv2.addWeighted(original_img, 1, window_img, 0.3, 0)
+    result = cv2.addWeighted(original_img, 1, newwarp, #window_img, 
+                             0.3, 0)
+    if DEBUG: plt.imshow(result); plt.show()
 
     if text:
         overlay = result.copy()
@@ -210,15 +221,33 @@ def sliding_window_search(out_img, binimg, nonzerox, nonzeroy):
                           & (nonzerox >= win_xright_low) 
                           & (nonzerox < win_xright_high)).nonzero()[0])
         # Append these indices to the lists (If list is non-empty)
-        if len(good_left_inds)  > 0:  left_lane_inds.append(good_left_inds)
-        if len(good_right_inds) > 0:  right_lane_inds.append(good_right_inds)
+        #if len(good_left_inds)  > 0:  
+        left_lane_inds.append(good_left_inds)
+        #if len(good_right_inds) > 0:  
+        right_lane_inds.append(good_right_inds)
         # If you found > minpix pixels, recenter next window on their mean position
         if len(good_left_inds) > MINPIX:
             leftx_current = np.int(np.mean(nonzerox[good_left_inds]))
+            LEFT_FIT.set_base_value(leftx_current)
         if len(good_right_inds) > MINPIX:        
             rightx_current = np.int(np.mean(nonzerox[good_right_inds]))
+            RIGHT_FIT.set_base_value(rightx_current)
 
     return left_lane_inds, right_lane_inds
+  
+def visualize_sliding_windows():
+    # Generate x and y values for plotting
+    ploty = np.linspace(0, binary_warped.shape[0]-1, binary_warped.shape[0] )
+    left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
+    right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
+
+    out_img[nonzeroy[left_lane_inds], nonzerox[left_lane_inds]] = [255, 0, 0]
+    out_img[nonzeroy[right_lane_inds], nonzerox[right_lane_inds]] = [0, 0, 255]
+    plt.imshow(out_img)
+    plt.plot(left_fitx, ploty, color='yellow')
+    plt.plot(right_fitx, ploty, color='yellow')
+    plt.xlim(0, 1280)
+    plt.ylim(720, 0)
 
 def optimized_search(binary_warped, nonzerox, nonzeroy):
 
