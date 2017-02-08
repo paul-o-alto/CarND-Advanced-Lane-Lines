@@ -16,7 +16,8 @@ class Line():
         #polynomial coefficients averaged over the last n iterations
         self.best_fit = None  
         #polynomial coefficients for the most recent fit
-        self.current_fit = [np.array([False])]  
+        self.current_fit = [np.array([False])] 
+        self.current_metric_fit = [np.array([False])]
         #radius of curvature of the line in pixel space
         self.roc_pix = None 
         #radius of curvature of the line in metric space
@@ -38,6 +39,9 @@ class Line():
         self.current_fit = fit
 
         self.best_fit = np.mean(self.last_n_fits, axis=0)
+
+    def set_current_metric_fit(self, fit):
+        self.current_metric_fit = fit
  
     def get_current_xbase(self):
         return self.recent_basis[-1]
