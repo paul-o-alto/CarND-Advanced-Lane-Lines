@@ -111,43 +111,44 @@ def calibration():
         print("Calibration error (here are cal_vars: %s)" % cal_vars)
         return None
  
-# Define a function that thresholds the S-channel of HLS
-def hls_select(img, thresh=(0, 255)):
-    hls = cv2.cvtColor(img, cv2.COLOR_BGR2HLS) # BGR! NOT RGB!
-    s_channel = hls[:,:,2]
-    binary_output = np.zeros_like(s_channel)
-    binary_output[(s_channel > thresh[0]) & (s_channel <= thresh[1])] = 1
-    return binary_output
-
-# Define a function that thresholds the S-channel of HLS
-def hsv_select(img, thresh=(0, 255)):
+# Define a function that thresholds channels of HSV
+def hsv_select(img, h_thresh=(0, 255), s_thresh=(0, 255), v_thresh=(0,255)):
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV) # BGR! NOT RGB!
+    h_channel = hsv[:,:,0]
     s_channel = hsv[:,:,1]
+    v_channel = hsv[:,:,2]
     binary_output = np.zeros_like(s_channel)
-    binary_output[((h_channel > h_thresh[0]) & (s_channel <= thresh[1]))] = 1
+    binary_output[(  ((h_channel > h_thresh[0]) & (h_channel <= h_thresh[1]))
+                   | ((s_channel > s_thresh[0]) & (s_channel <= s_thresh[1]))
+                   | ((v_channel > v_thresh[0]) & (v_channel <= v_thresh[1]))
+                  )] = 1
     return binary_output
 
 
 # Set the width of the windows +/- margin
-MARGIN = 50 #100
+MARGIN = 100
 # Set minimum number of pixels found to recenter window
 MINPIX = 50
 
-def visualize(original_img, binary_warped, Minv,  
-              nonzerox, nonzeroy, 
+def visualize(original_img, binary_warped, Minv, 
               text=None):
+
 
     # Create an image to draw on and an image to show the selection window
     warp_zero = np.zeros_like(binary_warped) 
     color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
     # Color in left and right line pixels
-    warp_zero[nonzeroy[LEFT_FIT.lane_inds] , nonzerox[LEFT_FIT.lane_inds]]  = [255, 0, 0]
-    warp_zero[nonzeroy[RIGHT_FIT.lane_inds], nonzerox[RIGHT_FIT.lane_inds]] = [0, 0, 255]
+    warp_zero[LEFT_FIT.ally , LEFT_FIT.allx]  = [255, 0, 0]
+    warp_zero[RIGHT_FIT.ally, RIGHT_FIT.allx] = [0, 0, 255]
 
     # Recast the x and y points into usable format for cv2.fillPoly()
     pts_left = np.array([np.transpose(np.vstack([LEFT_FIT.allx, LEFT_FIT.ally]))])
     pts_right = np.array([np.flipud(np.transpose(np.vstack([RIGHT_FIT.allx, RIGHT_FIT.ally])))])
     pts = np.hstack((pts_left, pts_right))
+
+    # Force Trapezoid (make horizontal points level)
+    #if pts_left[0][0]  > pts_right[0][0]:  pts_right[0][0]  = pts_left[0][0] 
+    #if pts_left[-1][0] < pts_right[-1][0]: pts_right[-1][0] = pts_left[-1][
 
     # Draw the lane onto the warped blank image
     cv2.fillPoly(warp_zero, np.int_([pts]), (0,255, 0))
@@ -208,10 +209,10 @@ def sliding_window_search(out_img, binimg, nonzerox, nonzeroy):
                           & (nonzerox >= win_xright_low) 
                           & (nonzerox < win_xright_high)).nonzero()[0])
         # Append these indices to the lists (If list is non-empty)
-        #if len(good_left_inds)  > 0:  
-        left_lane_inds.append(good_left_inds)
-        #if len(good_right_inds) > 0:  
-        right_lane_inds.append(good_right_inds)
+        if len(good_left_inds)  > 0:  
+            left_lane_inds.append(good_left_inds)
+        if len(good_right_inds) > 0:  
+            right_lane_inds.append(good_right_inds)
         # If you found > minpix pixels, recenter next window on their mean position
         if len(good_left_inds) > MINPIX:
             leftx_current = np.int(np.mean(nonzerox[good_left_inds]))
@@ -362,34 +363,42 @@ def pipeline(src_img):
     gray = cv2.cvtColor(original_image, cv2.COLOR_BGR2GRAY)
 
     # Apply each of the thresholding functions
-    # For abs_sobel_thresh, suggested param values:
-    #    min=5, max=100
-    gradx = abs_sobel_thresh(gray, orient='x', 
-                             sobel_kernel=ksize,
-                             thresh_min=5, thresh_max=100)
-    if DEBUG: print('abs_sobel_x'); plt.imshow(gradx); plt.show()
-                             #thresh_min=50, thresh_max=200)
-    grady = abs_sobel_thresh(gray, orient='y', 
-                             sobel_kernel=ksize, 
-                             thresh_min=50, thresh_max=200)
-    if DEBUG: print('abs_sobel_y'); plt.imshow(grady); plt.show()
-    # Suggested param values:
-    #    kernel=3, min=30, max=100
-    mag_binary = mag_thresh(gray, sobel_kernel=3, #ksize,
-                            mag_thresh=(30, 100)) 
-                            #mag_thresh=(50, 250))
-    if DEBUG: print('mag_binary'); plt.imshow(mag_binary); plt.show()
-    # Suggested param values:
-    #    kernel=15, thresh=(0.7, 1.3) # Was note used before
-    dir_binary = dir_threshold(gray, sobel_kernel=15, 
+    dir_binary = dir_threshold(gray, sobel_kernel=15,
                                thresh=(0.7, 1.3))
-    if DEBUG: print('dir_binary'); plt.imshow(dir_binary); plt.show()
-    hls_binary = hls_select(original_image, thresh=(200,255))
-    if DEBUG: print('hls_binary'); plt.imshow(hls_binary); plt.show()
+    mag_binary = mag_thresh(   gray, sobel_kernel=3,
+                               mag_thresh=(30, 100))
+ 
+    hls_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2HLS)
+    gradx_l = abs_sobel_thresh(hls_image[:,:,1], orient='x', 
+                               sobel_kernel=ksize,
+                               thresh_min=50, thresh_max=200)
+    gradx_s = abs_sobel_thresh(hls_image[:,:,2], orient='x',
+                               sobel_kernel=ksize,
+                               thresh_min=50, thresh_max=200)
+    gradx = np.zeros_like(dir_binary)
+    gradx[(gradx_l == 1) | (gradx_s == 1)] = 1
+    grady_l = abs_sobel_thresh(hls_image[:,:,1], orient='y', 
+                               sobel_kernel=ksize, 
+                               thresh_min=50, thresh_max=200)
+    grady_s = abs_sobel_thresh(hls_image[:,:,2], orient='y',
+                               sobel_kernel=ksize,
+                               thresh_min=50, thresh_max=200)
+    grady = np.zeros_like(dir_binary)
+    grady[(grady_l == 1) | (grady_s == 1)] = 1
+
+    print(gradx_l.shape, grady_s.shape)   
+ 
+    hsv_binary_y = hsv_select(original_image, 
+          h_thresh=(0,50), s_thresh=(100,255), v_thresh=(100,255))
+    hsv_binary_w = hsv_select(original_image,
+          h_thresh=(20,255), s_thresh=(0,80), v_thresh=(180, 255))
+    hsv_binary = np.zeros_like(dir_binary)
+    hsv_binary[(hsv_binary_y == 1) | (hsv_binary_y == 1)] = 1
+
     combined = np.zeros_like(dir_binary)
-    combined[(((gradx == 1) & (grady == 1)) 
-              | ((mag_binary == 1) & (dir_binary == 1)))
-            & (hls_binary == 1)] = 1
+    combined[((gradx == 1) & (grady == 1)) | 
+             ((mag_binary == 1) & (dir_binary == 1)) | 
+             (hsv_binary == 1)] = 1
     if DEBUG: 
         print('combined'); plt.imshow(combined); plt.show()
         cv2.imwrite('./output_images/binary_combo_example.jpg',
@@ -483,7 +492,6 @@ def pipeline(src_img):
 
     # combined or warped_image_color?
     result = visualize(original_image, warped_image_color, Minv,
-                       nonzerox, nonzeroy,
                        text=roc_text)
 
     if DEBUG:
@@ -519,7 +527,7 @@ def main():
             out_fn = './output_images/%s' % fname.split('/')[-1]
             print('Saving output to %s' % out_fn)
             cv2.imwrite(out_fn, result)
-            if DEBUG: return
+        if DEBUG: return
         # NOTE: save example images from each stage of your pipeline to the output_images folder 
         #       and provide a description of what each image is in your README for the project.
 
