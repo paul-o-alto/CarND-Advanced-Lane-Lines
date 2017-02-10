@@ -7,7 +7,7 @@ from moviepy.editor import VideoFileClip
 from line import Line
 
 PROCESS_VIDEO = True
-DEBUG = True
+DEBUG = not True
 OPTIMIZE = False # Starting value
 LEFT_FIT, RIGHT_FIT = Line(), Line() # Current lines
 CAL_VARS = None
@@ -374,43 +374,40 @@ def pipeline(src_img):
  
     #hls_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2HLS)
     hls_image = cv2.cvtColor(warped_cimage, cv2.COLOR_BGR2HLS)
-    #gradx_l 
-    gradx = abs_sobel_thresh(gray, #hls_image[:,:,1], 
+     
+    gradx_s = abs_sobel_thresh(hls_image[:,:,2], 
                                orient='x', 
                                sobel_kernel=ksize,
                                thresh_min=50, thresh_max=200)
-    #gradx_s = abs_sobel_thresh(#hls_image[:,:,2], 
-    #                           orient='x',
-    #                           sobel_kernel=ksize,
-    #                           thresh_min=50, thresh_max=200)
-    #gradx = np.zeros_like(dir_binary)
-    #gradx[(gradx_l == 1) | (gradx_s == 1)] = 1
-    #grady_l = 
-    grady = abs_sobel_thresh(gray, #hls_image[:,:,1], 
+    gradx_l = abs_sobel_thresh(hls_image[:,:,1], 
+                               orient='x',
+                               sobel_kernel=ksize,
+                               thresh_min=50, thresh_max=200)
+    gradx = np.zeros_like(dir_binary)
+    gradx[(gradx_l == 1) | (gradx_s == 1)] = 1
+     
+    grady_s = abs_sobel_thresh(hls_image[:,:,2], 
                                orient='y', 
                                sobel_kernel=ksize, 
                                thresh_min=50, thresh_max=200)
-    #grady_s = abs_sobel_thresh(hls_image[:,:,2], orient='y',
-    ##                           sobel_kernel=ksize,
-    #                           thresh_min=50, thresh_max=200)
-    #grady = np.zeros_like(dir_binary)
-    #grady[(grady_l == 1) | (grady_s == 1)] = 1
-
-    #print(gradx_l.shape, grady_s.shape)   
+    grady_l = abs_sobel_thresh(hls_image[:,:,2], orient='y',
+                               sobel_kernel=ksize,
+                               thresh_min=50, thresh_max=200)
+    grady = np.zeros_like(dir_binary)
+    grady[(grady_l == 1) | (grady_s == 1)] = 1
  
-    hsv_binary = hsv_select(warped_cimage, #original_image, 
-          h_thresh=(0,359), s_thresh=(0,255), v_thresh=(150,255))
-    #hsv_binary_w = hsv_select(warped_cimage, #original_image,
-    #      h_thresh=(20,255), s_thresh=(,80), v_thresh=(180, 255))
-    #hsv_binary = np.zeros_like(dir_binary)
-    #hsv_binary[(hsv_binary_y == 1) & (hsv_binary_y == 1)] = 1
+    hsv_binary_y = hsv_select(warped_cimage, 
+          h_thresh=(0,50), s_thresh=(100,255), v_thresh=(100,255))
+    hsv_binary_w = hsv_select(warped_cimage,
+          h_thresh=(20,255), s_thresh=(0,80), v_thresh=(180, 255))
+    hsv_binary = np.zeros_like(dir_binary)
+    hsv_binary[(hsv_binary_y == 1) | (hsv_binary_w == 1)] = 1
     #if DEBUG: print('hsv'); plt.imshow(hsv_binary); plt.show()
 
     combined = np.zeros_like(dir_binary)
-    combined[(((gradx == 1) | (grady == 1)) 
-              #| ((mag_binary == 1) & (dir_binary == 1))
-             ) 
-           & (hsv_binary == 1)
+    combined[((gradx == 1) | (grady == 1)) 
+              | ((mag_binary == 1) & (dir_binary == 1)) 
+              | (hsv_binary == 1)
              ] = 1
     if DEBUG: 
         print('combined'); plt.imshow(combined); plt.show()
