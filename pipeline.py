@@ -7,7 +7,7 @@ from moviepy.editor import VideoFileClip
 from line import Line
 
 PROCESS_VIDEO = True
-DEBUG = not True
+DEBUG = True
 OPTIMIZE = False # Starting value
 LEFT_FIT, RIGHT_FIT = Line(), Line() # Current lines
 CAL_VARS = None
@@ -119,8 +119,8 @@ def hsv_select(img, h_thresh=(0, 255), s_thresh=(0, 255), v_thresh=(0,255)):
     v_channel = hsv[:,:,2]
     binary_output = np.zeros_like(s_channel)
     binary_output[(  ((h_channel > h_thresh[0]) & (h_channel <= h_thresh[1]))
-                   | ((s_channel > s_thresh[0]) & (s_channel <= s_thresh[1]))
-                   | ((v_channel > v_thresh[0]) & (v_channel <= v_thresh[1]))
+                   & ((s_channel > s_thresh[0]) & (s_channel <= s_thresh[1]))
+                   & ((v_channel > v_thresh[0]) & (v_channel <= v_thresh[1]))
                   )] = 1
     return binary_output
 
@@ -336,10 +336,13 @@ def pipeline(src_img):
     img_size = img_size[::-1] # Reverse order
     
     # -50 = hood of car
-    src = np.float32([[(img_size[0]/2)-80,   img_size[1]/2+100],
-                      [(img_size[0]/6)+10,   img_size[1]-50], 
-                      [(img_size[0]*5/6)-10, img_size[1]-50],
-                      [(img_size[0]/2)+80,   img_size[1]/2+100]])
+    src = np.float32([#[(img_size[0]/2)-80,   img_size[1]/2+100],
+                       [(img_size[0]/2)-80, img_size[1]*5/8], # better for challenge
+                       [(img_size[0]/6)+10,   img_size[1]-50], 
+                       [(img_size[0]*5/6)-10, img_size[1]-50],
+                       [(img_size[0]/2)+80, img_size[1]*5/8] # better for challenge
+                      #[(img_size[0]/2)+80,   img_size[1]/2+100]]
+                     ])
     dst = np.float32([[(img_size[0]/4), 0],
                       [(img_size[0]/4), img_size[1]],
                       [(img_size[0]*3/4), img_size[1]],
@@ -350,62 +353,72 @@ def pipeline(src_img):
     # during the undistortion steps
     M = cv2.getPerspectiveTransform(src, dst)
     Minv = cv2.getPerspectiveTransform(dst, src)
-    warped_image_color = \
+    warped_cimage = \
         cv2.warpPerspective(original_image, M, img_size,
                                        flags=cv2.INTER_LINEAR)
     if DEBUG: 
         cv2.imwrite('./output_images/warped_straight_lines.jpg',
-                    warped_image_color)
+                    warped_cimage)
 
     # Choose a Sobel kernel size
     ksize = 3 
     # Choose an odd number >= 3 to smooth gradient measurements
-    gray = cv2.cvtColor(original_image, cv2.COLOR_BGR2GRAY)
+    #gray = cv2.cvtColor(original_image, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(warped_cimage, cv2.COLOR_BGR2GRAY)
 
     # Apply each of the thresholding functions
     dir_binary = dir_threshold(gray, sobel_kernel=15,
                                thresh=(0.7, 1.3))
     mag_binary = mag_thresh(   gray, sobel_kernel=3,
-                               mag_thresh=(30, 100))
+                               mag_thresh=(50, 100))
  
-    hls_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2HLS)
-    gradx_l = abs_sobel_thresh(hls_image[:,:,1], orient='x', 
+    #hls_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2HLS)
+    hls_image = cv2.cvtColor(warped_cimage, cv2.COLOR_BGR2HLS)
+    #gradx_l 
+    gradx = abs_sobel_thresh(gray, #hls_image[:,:,1], 
+                               orient='x', 
                                sobel_kernel=ksize,
                                thresh_min=50, thresh_max=200)
-    gradx_s = abs_sobel_thresh(hls_image[:,:,2], orient='x',
-                               sobel_kernel=ksize,
-                               thresh_min=50, thresh_max=200)
-    gradx = np.zeros_like(dir_binary)
-    gradx[(gradx_l == 1) | (gradx_s == 1)] = 1
-    grady_l = abs_sobel_thresh(hls_image[:,:,1], orient='y', 
+    #gradx_s = abs_sobel_thresh(#hls_image[:,:,2], 
+    #                           orient='x',
+    #                           sobel_kernel=ksize,
+    #                           thresh_min=50, thresh_max=200)
+    #gradx = np.zeros_like(dir_binary)
+    #gradx[(gradx_l == 1) | (gradx_s == 1)] = 1
+    #grady_l = 
+    grady = abs_sobel_thresh(gray, #hls_image[:,:,1], 
+                               orient='y', 
                                sobel_kernel=ksize, 
                                thresh_min=50, thresh_max=200)
-    grady_s = abs_sobel_thresh(hls_image[:,:,2], orient='y',
-                               sobel_kernel=ksize,
-                               thresh_min=50, thresh_max=200)
-    grady = np.zeros_like(dir_binary)
-    grady[(grady_l == 1) | (grady_s == 1)] = 1
+    #grady_s = abs_sobel_thresh(hls_image[:,:,2], orient='y',
+    ##                           sobel_kernel=ksize,
+    #                           thresh_min=50, thresh_max=200)
+    #grady = np.zeros_like(dir_binary)
+    #grady[(grady_l == 1) | (grady_s == 1)] = 1
 
-    print(gradx_l.shape, grady_s.shape)   
+    #print(gradx_l.shape, grady_s.shape)   
  
-    hsv_binary_y = hsv_select(original_image, 
-          h_thresh=(0,50), s_thresh=(100,255), v_thresh=(100,255))
-    hsv_binary_w = hsv_select(original_image,
-          h_thresh=(20,255), s_thresh=(0,80), v_thresh=(180, 255))
-    hsv_binary = np.zeros_like(dir_binary)
-    hsv_binary[(hsv_binary_y == 1) | (hsv_binary_y == 1)] = 1
+    hsv_binary = hsv_select(warped_cimage, #original_image, 
+          h_thresh=(0,359), s_thresh=(0,255), v_thresh=(150,255))
+    #hsv_binary_w = hsv_select(warped_cimage, #original_image,
+    #      h_thresh=(20,255), s_thresh=(,80), v_thresh=(180, 255))
+    #hsv_binary = np.zeros_like(dir_binary)
+    #hsv_binary[(hsv_binary_y == 1) & (hsv_binary_y == 1)] = 1
+    #if DEBUG: print('hsv'); plt.imshow(hsv_binary); plt.show()
 
     combined = np.zeros_like(dir_binary)
-    combined[((gradx == 1) & (grady == 1)) | 
-             ((mag_binary == 1) & (dir_binary == 1)) | 
-             (hsv_binary == 1)] = 1
+    combined[(((gradx == 1) | (grady == 1)) 
+              #| ((mag_binary == 1) & (dir_binary == 1))
+             ) 
+           & (hsv_binary == 1)
+             ] = 1
     if DEBUG: 
         print('combined'); plt.imshow(combined); plt.show()
         cv2.imwrite('./output_images/binary_combo_example.jpg',
                     combined)
 
-    combined = cv2.warpPerspective(combined, M, img_size,
-                                   flags=cv2.INTER_LINEAR)
+    #combined = cv2.warpPerspective(combined, M, img_size,
+    #                               flags=cv2.INTER_LINEAR)
 
     # Identify the x and y positions of all nonzero pixels in the image
     nonzero = combined.nonzero()
@@ -491,7 +504,7 @@ def pipeline(src_img):
     # Example values: 632.1 m 626.2 m 0.0
 
     # combined or warped_image_color?
-    result = visualize(original_image, warped_image_color, Minv,
+    result = visualize(original_image, warped_cimage, Minv,
                        text=roc_text)
 
     if DEBUG:
