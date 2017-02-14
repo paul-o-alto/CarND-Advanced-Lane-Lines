@@ -19,10 +19,9 @@ The goals / steps of this project were the following:
 
 [image1]: ./output_images/undistort_output.png "Undistorted"
 [image2]: ./test_images/test1.jpg "Road Transformed"
-[image3]: ./output_images/binary_combo_example.jpg "Binary Example"
+[image3]: ./output_images/binary_combo_example.png "Binary Example"
 [image4]: ./output_images/warped_straight_lines.jpg "Warp Example"
-[image5]: ./output_images/color_fit_lines.jpg "Fit Visual"
-[image6]: ./output_images/example_output.jpg "Output"
+[image5]: ./output_images/example_output.jpg "Output"
 [video1]: ./project_video_out.mp4 "Video"
 
 ## [Rubric](https://review.udacity.com/#!/rubrics/571/view) Points
@@ -87,7 +86,6 @@ I then proceeded to take the thresholded warped binary image computed before and
 
 The sliding window technique was not necessary for every frame. If it had already been performed in a previous frame, you could confine the search closer to where the existing polynomial was plotted. 
 
-![alt text][image5]
 
 ####5. Calculating the radius of curvature of the lane and the position of the vehicle with respect to center.
 
@@ -99,7 +97,7 @@ The position of the vehicle with respect to center was calculated in `compute_li
 
 I implemented this step in `pipeline.py` in the function `visualize()`.  Here is an example of my result on a test image:
 
-![alt text][image6]
+![alt text][image5]
 
 ---
 
