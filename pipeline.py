@@ -121,14 +121,14 @@ def hsv_select(img, h_thresh=(0, 255), s_thresh=(0, 255), v_thresh=(0,255)):
     binary_output[(  ((h_channel > h_thresh[0]) & (h_channel <= h_thresh[1]))
                    & ((s_channel > s_thresh[0]) & (s_channel <= s_thresh[1]))
                    & ((v_channel > v_thresh[0]) & (v_channel <= v_thresh[1]))
-                  )] = 1
+                  )] = 1 # & or |?
     return binary_output
 
 
 # Set the width of the windows +/- margin
-MARGIN = 100
+MARGIN = 25
 # Set minimum number of pixels found to recenter window
-MINPIX = 50
+MINPIX = 10
 
 def visualize(original_img, binary_warped, Minv, 
               text=None):
@@ -143,7 +143,9 @@ def visualize(original_img, binary_warped, Minv,
 
     # Recast the x and y points into usable format for cv2.fillPoly()
     pts_left = np.array([np.transpose(np.vstack([LEFT_FIT.allx, LEFT_FIT.ally]))])
-    pts_right = np.array([np.flipud(np.transpose(np.vstack([RIGHT_FIT.allx, RIGHT_FIT.ally])))])
+    pts_right = np.array([np.flipud(
+                         np.transpose(np.vstack([RIGHT_FIT.allx, RIGHT_FIT.ally])))
+                         ])
     pts = np.hstack((pts_left, pts_right))
 
     # Force Trapezoid (make horizontal points level)
@@ -152,6 +154,15 @@ def visualize(original_img, binary_warped, Minv,
 
     # Draw the lane onto the warped blank image
     cv2.fillPoly(warp_zero, np.int_([pts]), (0,255, 0))
+    cv2.polylines(warp_zero, np.int_([pts_left]) , 0, (255,0,0), thickness=30)
+    cv2.polylines(warp_zero, np.int_([pts_right]), 0, (255,0,0), thickness=30)
+    # Top line and bottom line (horizontal)
+    cv2.polylines(warp_zero, np.array([pts_left[-1].astype(np.int32), 
+                                      pts_right[-1].astype(np.int32)]),  0, (255,0,0),
+                  thickness=20)
+    cv2.polylines(warp_zero, np.array([pts_left[0].astype(np.int32) , 
+                                      pts_right[0].astype(np.int32)]) ,  0, (255,0,0),
+                  thickness=20)
 
     img_size = warp_zero.shape[0:2]
     img_size = img_size[::-1] # Reverse order
@@ -161,7 +172,8 @@ def visualize(original_img, binary_warped, Minv,
                                   flags=cv2.INTER_LINEAR)
 
     result = cv2.addWeighted(original_img, 1, newwarp, 
-                             0.3, 0)
+                             0.7, #0.5, #0.3, 
+                             0)
     if DEBUG: plt.imshow(result); plt.show()
 
     if text:
@@ -223,14 +235,18 @@ def sliding_window_search(out_img, binimg, nonzerox, nonzeroy):
 
     return left_lane_inds, right_lane_inds
   
-def visualize_sliding_windows():
+def visualize_sliding_windows(binary_warped, nonzeroy, nonzerox,
+                             left_lane_inds, right_lane_inds):
     # Generate x and y values for plotting
     ploty = np.linspace(0, binary_warped.shape[0]-1, binary_warped.shape[0] )
-    left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
-    right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
+    left_fitx = (LEFT_FIT.current_fit[0]*ploty**2 
+               + LEFT_FIT.current_fit[1]*ploty + LEFT_FIT.current_fit[2])
+    right_fitx = (RIGHT_FIT.current_fit[0]*ploty**2 
+               + RIGHT_FIT.current_fit[1]*ploty + RIGHT_FIT.current_fit[2])
 
-    out_img[nonzeroy[left_lane_inds], nonzerox[left_lane_inds]] = [255, 0, 0]
-    out_img[nonzeroy[right_lane_inds], nonzerox[right_lane_inds]] = [0, 0, 255]
+    out_img = np.zeros_like(binary_warped)
+    out_img[LEFT_FIT.ally, LEFT_FIT.allx] = 255 #[255, 0, 0]
+    out_img[RIGHT_FIT.ally, RIGHT_FIT.allx] = 100 #[0, 0, 255]
     plt.imshow(out_img)
     plt.plot(left_fitx, ploty, color='yellow')
     plt.plot(right_fitx, ploty, color='yellow')
@@ -282,7 +298,7 @@ def compute_line_metrics(combined, img_size):
     fit_rightx = (RIGHT_FIT.best_fit[0]*fity**2 
                  + RIGHT_FIT.best_fit[1]*fity + RIGHT_FIT.best_fit[2])
 
-    # Compute radius of curvature
+   
     ploty = np.linspace(0, combined.shape[0]-1, combined.shape[0])
     # to cover same y-range as image
     y_eval = np.max(ploty)
@@ -337,10 +353,10 @@ def pipeline(src_img):
     
     # -50 = hood of car
     src = np.float32([#[(img_size[0]/2)-80,   img_size[1]/2+100],
-                       [(img_size[0]/2)-80, img_size[1]*5/8], # better for challenge
-                       [(img_size[0]/6)+10,   img_size[1]-50], 
-                       [(img_size[0]*5/6)-10, img_size[1]-50],
-                       [(img_size[0]/2)+80, img_size[1]*5/8] # better for challenge
+                       [(img_size[0]/2)-100, img_size[1]*5/8], # better for challenge
+                       [(img_size[0]/6)-20,   img_size[1]-50], 
+                       [(img_size[0]*5/6)+20, img_size[1]-50],
+                       [(img_size[0]/2)+100, img_size[1]*5/8] # better for challenge
                       #[(img_size[0]/2)+80,   img_size[1]/2+100]]
                      ])
     dst = np.float32([[(img_size[0]/4), 0],
@@ -359,6 +375,8 @@ def pipeline(src_img):
     if DEBUG: 
         cv2.imwrite('./output_images/warped_straight_lines.jpg',
                     warped_cimage)
+        #plt.imshow(warped_cimage)
+        #plt.show()
 
     # Choose a Sobel kernel size
     ksize = 3 
@@ -375,27 +393,29 @@ def pipeline(src_img):
     #hls_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2HLS)
     hls_image = cv2.cvtColor(warped_cimage, cv2.COLOR_BGR2HLS)
      
-    gradx_s = abs_sobel_thresh(hls_image[:,:,2], 
-                               orient='x', 
-                               sobel_kernel=ksize,
-                               thresh_min=50, thresh_max=200)
+    #gradx_s = abs_sobel_thresh(hls_image[:,:,2], 
+    #                           orient='x', 
+    #                           sobel_kernel=ksize,
+    #                           thresh_min=50, thresh_max=200)
     gradx_l = abs_sobel_thresh(hls_image[:,:,1], 
                                orient='x',
                                sobel_kernel=ksize,
                                thresh_min=50, thresh_max=200)
-    gradx = np.zeros_like(dir_binary)
-    gradx[(gradx_l == 1) | (gradx_s == 1)] = 1
-     
-    grady_s = abs_sobel_thresh(hls_image[:,:,2], 
-                               orient='y', 
-                               sobel_kernel=ksize, 
-                               thresh_min=50, thresh_max=200)
+    #gradx = np.zeros_like(dir_binary)
+    #gradx[(gradx_l == 1) | (gradx_s == 1)] = 1
+    gradx = gradx_l     
+
+    #grady_s = abs_sobel_thresh(hls_image[:,:,2], 
+    #                           orient='y', 
+    #                           sobel_kernel=ksize, 
+    #                           thresh_min=50, thresh_max=200)
     grady_l = abs_sobel_thresh(hls_image[:,:,2], orient='y',
                                sobel_kernel=ksize,
                                thresh_min=50, thresh_max=200)
-    grady = np.zeros_like(dir_binary)
-    grady[(grady_l == 1) | (grady_s == 1)] = 1
- 
+    #grady = np.zeros_like(dir_binary)
+    #grady[(grady_l == 1) | (grady_s == 1)] = 1
+    grady = grady_l 
+
     hsv_binary_y = hsv_select(warped_cimage, 
           h_thresh=(0,50), s_thresh=(100,255), v_thresh=(100,255))
     hsv_binary_w = hsv_select(warped_cimage,
@@ -405,15 +425,14 @@ def pipeline(src_img):
     #if DEBUG: print('hsv'); plt.imshow(hsv_binary); plt.show()
 
     combined = np.zeros_like(dir_binary)
-    combined[((gradx == 1) | (grady == 1)) 
-              | ((mag_binary == 1) & (dir_binary == 1)) 
-              | (hsv_binary == 1)
+    combined[(((gradx == 1) | (grady == 1)) 
+            | ((mag_binary == 1) & (dir_binary == 1)))
+            | (hsv_binary == 1)
              ] = 1
     if DEBUG: 
         print('combined'); plt.imshow(combined); plt.show()
         cv2.imwrite('./output_images/binary_combo_example.jpg',
                     combined)
-
     #combined = cv2.warpPerspective(combined, M, img_size,
     #                               flags=cv2.INTER_LINEAR)
 
@@ -462,7 +481,7 @@ def pipeline(src_img):
         RIGHT_FIT.allx = nonzerox[RIGHT_FIT.lane_inds]
         RIGHT_FIT.ally = nonzeroy[RIGHT_FIT.lane_inds]
    
-        new_left  = False
+        new_left  = False; 
         new_right = False
         # Fit a second order polynomial to each
         if len(LEFT_FIT.ally ) > 0 and len(LEFT_FIT.allx ) > 0:
@@ -473,7 +492,9 @@ def pipeline(src_img):
             LEFT_FIT.set_current_fit(new_left_fit)
             LEFT_FIT.set_current_metric_fit(new_left_fit_m)
             LEFT_FIT.diffs  = abs(LEFT_FIT.current_fit - new_left_fit)
-            new_left = True
+            if LEFT_FIT.diffs[0] < 0.1 and LEFT_FIT.diffs[1] < 0.1: 
+                new_left = True # Sanity check
+
         if len(RIGHT_FIT.ally) > 0 and len(RIGHT_FIT.allx) > 0:
             new_right_fit = np.polyfit(RIGHT_FIT.ally, RIGHT_FIT.allx, 2)
             # Fit new polynomial to x,y in world space
@@ -482,9 +503,17 @@ def pipeline(src_img):
             RIGHT_FIT.set_current_fit(new_right_fit)
             RIGHT_FIT.set_current_metric_fit(new_right_fit_m)
             RIGHT_FIT.diffs = abs(RIGHT_FIT.current_fit - new_right_fit)
-            new_right = True
-        LEFT_FIT.detected = new_left
-        RIGHT_FIT.detected = new_right
+            if RIGHT_FIT.diffs[0] < 0.1 and RIGHT_FIT.diffs[1] < 0.1:
+                new_right = True # Sanity check
+
+        if new_left and new_right:
+            if ((new_left_fit[0] > 0 and new_right_fit[0] > 0) 
+               or (new_left_fit[1] < 0 and new_right_fit[1] < 0)):
+                LEFT_FIT.detected = new_left
+                RIGHT_FIT.detected = new_right
+        else:
+            LEFT_FIT.detected  = False
+            RIGHT_FIT.detected = False
 
         if new_left and new_right:
             compute_line_metrics(combined, img_size)   
@@ -499,6 +528,8 @@ def pipeline(src_img):
                   off_cen))
     print(roc_text)
     # Example values: 632.1 m 626.2 m 0.0
+    if DEBUG: visualize_sliding_windows(combined, nonzeroy, nonzerox,
+                                     left_lane_inds, right_lane_inds)
 
     # combined or warped_image_color?
     result = visualize(original_image, warped_cimage, Minv,
@@ -506,6 +537,7 @@ def pipeline(src_img):
 
     if DEBUG:
         cv2.imwrite('./output_images/example_output.jpg', result)
+        plt.imshow(result); plt.show()
 
     return result 
 
@@ -529,7 +561,7 @@ def main():
  
     # TODO: For a series of test images (in the test_images folder in the repository): 
     if CAL_VARS:
-        images = glob.glob('test_images/test*.jpg')
+        images = glob.glob('test_images/*.jpg')
         print("Looking at images %s" % images)
         for idx, fname in enumerate(images):
             image = cv2.imread(fname)
