@@ -126,9 +126,9 @@ def hsv_select(img, h_thresh=(0, 255), s_thresh=(0, 255), v_thresh=(0,255)):
 
 
 # Set the width of the windows +/- margin
-MARGIN = 25
+MARGIN = 75
 # Set minimum number of pixels found to recenter window
-MINPIX = 10
+MINPIX = 50
 
 def visualize(original_img, binary_warped, Minv, 
               text=None):
@@ -351,18 +351,29 @@ def pipeline(src_img):
     img_size = original_image.shape[0:2]
     img_size = img_size[::-1] # Reverse order
     
-    # -50 = hood of car
+    """
     src = np.float32([#[(img_size[0]/2)-80,   img_size[1]/2+100],
-                       [(img_size[0]/2)-100, img_size[1]*5/8], # better for challenge
-                       [(img_size[0]/6)-20,   img_size[1]-50], 
-                       [(img_size[0]*5/6)+20, img_size[1]-50],
-                       [(img_size[0]/2)+100, img_size[1]*5/8] # better for challenge
+                       [(img_size[0]/2)-50, img_size[1]*5/8], # better for challenge
+                       [(img_size[0]/5),   img_size[1]-50], 
+                       [(img_size[0]*4/5), img_size[1]-50],
+                       [(img_size[0]/2)+50, img_size[1]*5/8] # better for challenge
                       #[(img_size[0]/2)+80,   img_size[1]/2+100]]
                      ])
     dst = np.float32([[(img_size[0]/4), 0],
                       [(img_size[0]/4), img_size[1]],
                       [(img_size[0]*3/4), img_size[1]],
                       [(img_size[0]*3/4), 0]])
+    """
+    src = np.float32(
+      [[(img_size[0] / 2) - 55, img_size[1]/ 2 + 100],
+      [(img_size[0]  / 6) + 30, img_size[1]-100],
+      [(img_size[0]*5/ 6) - 30, img_size[1]-100],
+      [(img_size[0]  / 2) + 55, img_size[1]/ 2 + 100]])
+    dst = np.float32(
+      [[(img_size[0] / 4), 0],
+      [(img_size[0] / 4), img_size[1]],
+      [(img_size[0] * 3 / 4), img_size[1]],
+      [(img_size[0] * 3 / 4), 0]])
 
     # One especially smart way to do this would be to use 
     # four well-chosen corners that were automatically detected 
@@ -375,8 +386,8 @@ def pipeline(src_img):
     if DEBUG: 
         cv2.imwrite('./output_images/warped_straight_lines.jpg',
                     warped_cimage)
-        #plt.imshow(warped_cimage)
-        #plt.show()
+        plt.imshow(warped_cimage)
+        plt.show()
 
     # Choose a Sobel kernel size
     ksize = 3 
@@ -393,28 +404,28 @@ def pipeline(src_img):
     #hls_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2HLS)
     hls_image = cv2.cvtColor(warped_cimage, cv2.COLOR_BGR2HLS)
      
-    #gradx_s = abs_sobel_thresh(hls_image[:,:,2], 
-    #                           orient='x', 
-    #                           sobel_kernel=ksize,
-    #                           thresh_min=50, thresh_max=200)
+    gradx_s = abs_sobel_thresh(hls_image[:,:,2], 
+                               orient='x', 
+                               sobel_kernel=ksize,
+                               thresh_min=50, thresh_max=200)
     gradx_l = abs_sobel_thresh(hls_image[:,:,1], 
                                orient='x',
                                sobel_kernel=ksize,
                                thresh_min=50, thresh_max=200)
-    #gradx = np.zeros_like(dir_binary)
-    #gradx[(gradx_l == 1) | (gradx_s == 1)] = 1
-    gradx = gradx_l     
+    gradx = np.zeros_like(dir_binary)
+    gradx[(gradx_l == 1) | (gradx_s == 1)] = 1
+    #gradx = gradx_l     
 
-    #grady_s = abs_sobel_thresh(hls_image[:,:,2], 
-    #                           orient='y', 
-    #                           sobel_kernel=ksize, 
-    #                           thresh_min=50, thresh_max=200)
+    grady_s = abs_sobel_thresh(hls_image[:,:,2], 
+                               orient='y', 
+                               sobel_kernel=ksize, 
+                               thresh_min=50, thresh_max=200)
     grady_l = abs_sobel_thresh(hls_image[:,:,2], orient='y',
                                sobel_kernel=ksize,
                                thresh_min=50, thresh_max=200)
-    #grady = np.zeros_like(dir_binary)
-    #grady[(grady_l == 1) | (grady_s == 1)] = 1
-    grady = grady_l 
+    grady = np.zeros_like(dir_binary)
+    grady[(grady_l == 1) | (grady_s == 1)] = 1
+    #grady = grady_l 
 
     hsv_binary_y = hsv_select(warped_cimage, 
           h_thresh=(0,50), s_thresh=(100,255), v_thresh=(100,255))
